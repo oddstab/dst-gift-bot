@@ -65,7 +65,21 @@ Run it for real (one heartbeat every 6 minutes, Ctrl+C to stop):
 python dst_gift_bot.py
 ```
 
-To keep it alive after a reboot, point Task Scheduler at `pythonw.exe dst_gift_bot.py`.
+### Start at logon (Task Scheduler)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-task.ps1
+```
+
+Registers a task that runs `pythonw.exe` (no console window) 30 seconds after you log in,
+restarts it if it dies, and sets no execution time limit. The delay gives Steam time to come
+up; the bot also waits for Steam on its own, for up to 10 minutes.
+
+Remove it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
+```
 
 ## What you get
 

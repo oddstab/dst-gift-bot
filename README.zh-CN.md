@@ -63,7 +63,20 @@ python dst_gift_bot.py --game "D:\Steam\steamapps\common\Don't Starve Together"
 python dst_gift_bot.py
 ```
 
-要开机自动启动，用任务计划程序指向 `pythonw.exe dst_gift_bot.py`。
+### 开机自动启动（任务计划程序）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-task.ps1
+```
+
+会用 `pythonw.exe`（不弹窗口）在登录后 30 秒启动，进程挂掉自动重启，且不设运行时间上限。
+延迟是留给 Steam 连接的时间；机器人本身也会等 Steam 就绪，最多等 10 分钟。
+
+要移除：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
+```
 
 ## 会生成什么
 

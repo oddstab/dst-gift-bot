@@ -259,6 +259,19 @@ def daemon(kl, state):
         time.sleep(TICK_INTERVAL)
 
 
+def open_steam(timeout=600):
+    """A logon task can fire before Steam is ready, so keep retrying instead of dying."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            return Steam()
+        except Exception as e:
+            if time.time() >= deadline:
+                raise
+            log(f"waiting for Steam: {e}")
+            time.sleep(15)
+
+
 def selftest():
     import struct
     # Weekly reset is Thursday 21:40 UTC; every key in the game's own drops file lands there
@@ -287,7 +300,7 @@ def main():
         sys.exit("Could not find Don't Starve Together. Pass --game \"<path to the game folder>\".")
     log(f"game folder: {GAME_DIR}")
 
-    steam = Steam()
+    steam = open_steam()
     kl = Klei(steam)
     state = load_state()
     if args.once:
