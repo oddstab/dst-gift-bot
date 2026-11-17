@@ -1,0 +1,6 @@
+state.json
+dst_gift_bot.log
+dst_afk.log
+steamctx/
+__pycache__/
+*.pyc
