@@ -32,6 +32,7 @@ DAILY_CHECK_INTERVAL = 3600
 INVENTORY_CHECK_EVERY = 6              # every 6 heartbeats (36 min)
 STATE_PATH = os.path.join(BASE, "state.json")
 LOG_PATH = os.path.join(BASE, "dst_gift_bot.log")
+LOCK_PATH = os.path.join(BASE, "dst_gift_bot.lock")
 
 ITEMS_URL = "https://items.kleientertainment.com/clientitems/DST/"
 LOGIN_URL = "https://login.kleientertainment.com/login/LoginViaSteam"
@@ -299,6 +300,30 @@ def daemon(kl, state):
         time.sleep(TICK_INTERVAL)
 
 
+def acquire_lock():
+    """同一時間只允許一個實例。
+
+    兩個行程各開一個 Steam 工作階段會互相把對方踢掉，看起來就像「跑到一半莫名死掉」。
+    鎖在行程結束時由作業系統釋放，所以當掉不會留下死鎖。
+    """
+    f = open(LOCK_PATH, "a+")
+    if os.path.getsize(LOCK_PATH) == 0:
+        f.write(".")
+        f.flush()
+    f.seek(0)
+    try:
+        if IS_WIN:
+            import msvcrt
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 def open_steam(lib=None, timeout=600):
     """A logon task can fire before Steam is ready, so keep retrying instead of dying."""
     deadline = time.time() + timeout
@@ -341,6 +366,11 @@ def main():
     if args.selftest:
         selftest()
         return
+
+    lock = acquire_lock()
+    if lock is None:
+        log("already running in another process, exiting")
+        sys.exit(0)
 
     GAME_DIR = find_game(args.game)
     if not GAME_DIR:
