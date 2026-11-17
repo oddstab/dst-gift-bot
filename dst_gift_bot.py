@@ -359,4 +359,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception:
+        # pythonw 沒有 stderr，崩潰一定要落進日誌才看得到
+        import traceback
+        log("FATAL: " + traceback.format_exc().replace("\n", " | "))
+        raise
