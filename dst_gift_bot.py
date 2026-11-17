@@ -229,7 +229,10 @@ def run_once(kl, state, check_inv=True):
     state["ticks"] += 1
     state["last_tick"] = int(time.time())
     if not record_gifts(state, result, "tick"):
-        log(f"heartbeat #{state['ticks']} ok={not result.get('Error')}")
+        if result.get("Error"):
+            log(f"heartbeat #{state['ticks']} failed: {result.get('ErrorCode') or result}")
+        else:
+            log(f"heartbeat #{state['ticks']} ok")
     if check_inv:
         check_inventory(kl, state)
     save_state(state)
