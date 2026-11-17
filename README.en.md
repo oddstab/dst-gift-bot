@@ -1,4 +1,4 @@
-# dontstarve-gift-bot
+# dst-gift-bot
 
 [繁體中文](README.md) ｜ [English](README.en.md) ｜ [简体中文](README.zh-CN.md)
 
@@ -47,8 +47,8 @@ POST /clientitems/DST/GetAllItems every 36 min   <- confirms items actually arri
 ## Quick start
 
 ```bat
-git clone https://github.com/oddstab/dontstarve-gift-bot.git
-cd dontstarve-gift-bot
+git clone https://github.com/oddstab/dst-gift-bot.git
+cd dst-gift-bot
 python dst_gift_bot.py --once
 ```
 
