@@ -8,7 +8,7 @@
 並記錄每一件實際進帳的禮物。
 
 > 對 build `762172` 逆向與實測。所有結論都有反組譯、封包或 API 實測支撐——
-> 詳見 [REPORT.md](REPORT.md) 與 [DST_endpoints.md](DST_endpoints.md)。
+> 詳見 [REPORT.md](REPORT.md) 與 [dst-endpoints](https://github.com/oddstab/dst-endpoints)。
 
 ---
 
@@ -84,21 +84,31 @@ python dst_gift_bot.py
 
 ## 常見問題
 
-**需要安裝遊戲嗎？** 需要。腳本要載入 `steam_api64.dll`，並從安裝目錄讀 `version.txt`。
+### 需要安裝遊戲嗎？
 
-**需要遊戲在執行嗎？** 不需要，這正是重點。
+需要。腳本要載入 `steam_api64.dll`，並從安裝目錄讀 `version.txt`。
 
-**需要專用伺服器嗎？** 不需要，而且專用伺服器本身產不出掉落——它的執行檔根本沒有
+### 需要遊戲在執行嗎？
+
+不需要，這正是重點。
+
+### 需要專用伺服器嗎？
+
+不需要，而且專用伺服器本身產不出掉落——它的執行檔根本沒有
 `Tick` 這個端點。
 
-**為什麼 Steam 會顯示我在玩 DST？** Steam 判斷「在玩某個遊戲」的依據，是有沒有行程用
+### 為什麼 Steam 會顯示我在玩 DST？
+
+Steam 判斷「在玩某個遊戲」的依據，是有沒有行程用
 `steam_api64.dll` 以該 appid 建立了 Steam 使用者 session，它不看遊戲視窗、也不看行程名稱。
 `SteamAPI_Init()` 正是做這件事：透過本機 IPC 連上執行中的 Steam 用戶端，以 `322330`
 建立 local user 並註冊成執行中，Steam 用戶端就把帳號標成 in-game。
 這是取得你帳號 ticket 的必要代價，關掉腳本就會恢復。匿名登入
 （`SteamAPI_InitAnonymousUser`）雖然不會顯示，但也拿不到屬於你帳號的票。
 
-**Klei 改了東西怎麼辦？** `version.txt` 的 build 號是執行時讀的，會自動帶進
+### Klei 改了東西怎麼辦？
+
+`version.txt` 的 build 號是執行時讀的，會自動帶進
 `User-Agent`，例行更新通常照跑。若驗證流程變了，腳本會記錄 `E_INVALID_TOKEN`
 並中斷該輪，不會默默失敗。
 
@@ -114,8 +124,8 @@ python dst_gift_bot.py
 
 - [REPORT.md](REPORT.md) — 完整逆向報告：反組譯位址、360 秒常數、重置排程、
   為什麼掛機有效、五種方案的可行性對照。
-- [DST_endpoints.md](DST_endpoints.md) — 客戶端執行檔裡找到的所有 Klei 端點，
-  含請求欄位與每一條的把握程度。
+- [dst-endpoints](https://github.com/oddstab/dst-endpoints) — 另一個 repo，把用戶端
+  執行檔裡所有 Klei 端點逐一實測，記錄哪些還活著、哪些已下架、各自吃哪個認證欄位。
 
 ## 授權
 

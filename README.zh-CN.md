@@ -8,7 +8,7 @@
 并记录每一件实际到账的礼物。
 
 > 针对 build `762172` 逆向并实测。所有结论都有反汇编、抓包或 API 实测支撑——
-> 详见 [REPORT.md](REPORT.md) 与 [DST_endpoints.md](DST_endpoints.md)。
+> 详见 [REPORT.md](REPORT.md) 与 [dst-endpoints](https://github.com/oddstab/dst-endpoints)。
 
 ---
 
@@ -84,21 +84,31 @@ python dst_gift_bot.py
 
 ## 常见问题
 
-**需要安装游戏吗？** 需要。脚本要加载 `steam_api64.dll`，并从安装目录读取 `version.txt`。
+### 需要安装游戏吗？
 
-**需要游戏在运行吗？** 不需要，这正是重点。
+需要。脚本要加载 `steam_api64.dll`，并从安装目录读取 `version.txt`。
 
-**需要专用服务器吗？** 不需要，而且专用服务器本身产不出掉落——它的可执行文件里
+### 需要游戏在运行吗？
+
+不需要，这正是重点。
+
+### 需要专用服务器吗？
+
+不需要，而且专用服务器本身产不出掉落——它的可执行文件里
 根本没有 `Tick` 这个接口。
 
-**为什么 Steam 会显示我在玩 DST？** Steam 判断「在玩某个游戏」的依据，是有没有进程用
+### 为什么 Steam 会显示我在玩 DST？
+
+Steam 判断「在玩某个游戏」的依据，是有没有进程用
 `steam_api64.dll` 为该 appid 建立了 Steam 用户会话，它不看游戏窗口、也不看进程名。
 `SteamAPI_Init()` 正是做这件事：通过本地 IPC 连上正在运行的 Steam 客户端，以 `322330`
 建立 local user 并注册为运行中，Steam 客户端就会把账号标记为 in-game。
 这是取得你自己账号票据的必要代价，关掉脚本就会恢复。匿名初始化
 （`SteamAPI_InitAnonymousUser`）虽然不会显示，但也拿不到属于你账号的票据。
 
-**Klei 改了东西怎么办？** `version.txt` 的 build 号是运行时读取的，会自动写进
+### Klei 改了东西怎么办？
+
+`version.txt` 的 build 号是运行时读取的，会自动写进
 `User-Agent`，日常更新通常照常可用。若验证流程变了，脚本会记录 `E_INVALID_TOKEN`
 并跳过该轮，不会静默失败。
 
@@ -114,8 +124,8 @@ python dst_gift_bot.py
 
 - [REPORT.md](REPORT.md) — 完整逆向报告：反汇编地址、360 秒常量、重置排期、
   为什么挂机有效、五种方案的可行性对照。
-- [DST_endpoints.md](DST_endpoints.md) — 客户端可执行文件里找到的所有 Klei 接口，
-  含请求字段与每一条的把握程度。
+- [dst-endpoints](https://github.com/oddstab/dst-endpoints) — 另一个仓库，把客户端
+  可执行文件里所有 Klei 接口逐一实测，记录哪些还活着、哪些已下线、各自使用哪个认证字段。
 
 ## 许可
 

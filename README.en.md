@@ -8,7 +8,7 @@ A background Python script that talks to the same Klei endpoints the game itself
 sends the same 6-minute heartbeat, and logs every drop it actually receives.
 
 > Reverse-engineered from build `762172`. Every claim is backed by disassembly, captured
-> traffic or live API responses — see [REPORT.md](REPORT.md) and [DST_endpoints.md](DST_endpoints.md).
+> traffic or live API responses — see [REPORT.md](REPORT.md) and [dst-endpoints](https://github.com/oddstab/dst-endpoints).
 
 ---
 
@@ -87,15 +87,23 @@ that is the whole loop, proven end to end.
 
 ## FAQ
 
-**Does the game need to be installed?** Yes. The script loads `steam_api64.dll` and reads
+### Does the game need to be installed?
+
+Yes. The script loads `steam_api64.dll` and reads
 `version.txt` from the install folder.
 
-**Does the game need to be running?** No. That is the entire point.
+### Does the game need to be running?
 
-**Does this need the dedicated server?** No, and a dedicated server cannot earn drops on its
+No. That is the entire point.
+
+### Does this need the dedicated server?
+
+No, and a dedicated server cannot earn drops on its
 own — its binary has no `Tick` endpoint at all.
 
-**Why does Steam show me as "playing DST"?** Steam decides you are in a game based on whether
+### Why does Steam show me as "playing DST"?
+
+Steam decides you are in a game based on whether
 some process has created a Steam user session for that app id through `steam_api64.dll` — not
 on a game window or a process name. `SteamAPI_Init()` does exactly that: it connects over local
 IPC to the running Steam client, creates a local user for `322330` and registers the app as
@@ -103,7 +111,9 @@ running, so the client flips your status to in-game. It is the unavoidable cost 
 ticket for your own account, and it reverts as soon as the script exits. Anonymous init
 (`SteamAPI_InitAnonymousUser`) avoids the status but cannot produce a ticket for your account.
 
-**What if Klei changes something?** The build number is read from `version.txt` at runtime and
+### What if Klei changes something?
+
+The build number is read from `version.txt` at runtime and
 goes into the `User-Agent`, so routine updates keep working. If the auth flow changes, the
 script logs `E_INVALID_TOKEN` and skips the cycle instead of failing silently.
 
@@ -120,8 +130,9 @@ script logs `E_INVALID_TOKEN` and skips the cycle instead of failing silently.
 
 - [REPORT.md](REPORT.md) — full reverse-engineering report: disassembly addresses, the 360 s
   constant, reset schedule, why AFK works, feasibility comparison of five approaches.
-- [DST_endpoints.md](DST_endpoints.md) — every Klei endpoint found in the client binary,
-  with request body fields and how confident each entry is.
+- [dst-endpoints](https://github.com/oddstab/dst-endpoints) — a separate repo that probes
+  every Klei endpoint found in the client binary against the live servers: which ones still
+  work, which are retired, and which auth field each one reads.
 
 ## License
 
