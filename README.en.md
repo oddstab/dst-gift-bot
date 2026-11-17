@@ -85,6 +85,10 @@ sudo systemctl enable --now dst-gift-bot
 
 (Adjust `WorkingDirectory` and `User` to your setup.)
 
+> Note: platform detection and error handling were verified on Ubuntu 26.04, but **minting a
+> real ticket this way has not been tested**, because it needs `libsteam_api.so` from the Linux
+> build of DST. The Windows path is the only one verified end to end.
+
 ### Start at logon (Windows Task Scheduler)
 
 ```powershell

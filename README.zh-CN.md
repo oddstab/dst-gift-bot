@@ -82,6 +82,9 @@ sudo systemctl enable --now dst-gift-bot
 
 （`WorkingDirectory` 与 `User` 记得按你的环境改。）
 
+> 注意：这条路径已在 Ubuntu 26.04 验证过平台判断与错误处理，但**实际取票尚未实测**，
+> 因为需要 Linux 版 DST 的 `libsteam_api.so`。Windows 路径是唯一经过完整验证的。
+
 ### 开机自动启动（Windows 任务计划程序）
 
 ```powershell
