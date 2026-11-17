@@ -65,7 +65,27 @@ Run it for real (one heartbeat every 6 minutes, Ctrl+C to stop):
 python dst_gift_bot.py
 ```
 
-### Start at logon (Task Scheduler)
+### Running on Linux / a VM (optional)
+
+The same script runs on Linux using the `libsteam_api.so` that ships with the native Linux
+build of DST. That machine needs a **logged-in Linux Steam client** — Steam *is* the session,
+exactly as on Windows.
+
+```bash
+python3 dst_gift_bot.py --game ~/.steam/steam/steamapps/common/"Don't Starve Together"
+```
+
+The script picks `bin64/steam_api64.dll` or `lib64/libsteam_api.so` based on the platform;
+`--lib` overrides it. To keep it running:
+
+```bash
+sudo cp dst-gift-bot.service /etc/systemd/system/
+sudo systemctl enable --now dst-gift-bot
+```
+
+(Adjust `WorkingDirectory` and `User` to your setup.)
+
+### Start at logon (Windows Task Scheduler)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-task.ps1

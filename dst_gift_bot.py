@@ -51,6 +51,54 @@ def _read(path):
         return f.read()
 
 
+IS_WIN = sys.platform.startswith("win")
+GAME_NAME = "Don't Starve Together"
+
+
+def lib_candidates(game):
+    """Where the Steamworks client library lives inside the game folder.
+
+    Windows ships bin64/steam_api64.dll; the native Linux build ships a libsteam_api.so
+    somewhere under the game root, and the exact folder has changed between builds.
+    """
+    if IS_WIN:
+        return [os.path.join(game, "bin64", "steam_api64.dll")]
+    return [os.path.join(game, "lib64", "libsteam_api.so"),
+            os.path.join(game, "bin", "libsteam_api.so"),
+            os.path.join(game, "lib", "libsteam_api.so"),
+            os.path.join(game, "libsteam_api.so")]
+
+
+def find_lib(game, explicit=None):
+    for c in ([explicit] if explicit else []) + lib_candidates(game):
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+def _steam_roots():
+    """Every Steam library root we can discover on this OS."""
+    roots = []
+    if IS_WIN:
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
+            roots.append(winreg.QueryValueEx(key, "SteamPath")[0])
+        except Exception:
+            pass
+        roots += [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"]
+    else:
+        home = os.path.expanduser("~")
+        roots += [os.path.join(home, ".steam", "steam"),
+                  os.path.join(home, ".local", "share", "Steam"),
+                  os.path.join(home, "snap", "steam", "common", ".local", "share", "Steam")]
+    for r in list(roots):
+        vdf = os.path.join(r, "steamapps", "libraryfolders.vdf")
+        if os.path.isfile(vdf):
+            roots += re.findall(r'"path"\s+"([^"]+)"', _read(vdf))
+    return roots
+
+
 def find_game(explicit=None):
     """Locate the DST install. Works no matter where this script lives."""
     cands = []
@@ -59,23 +107,11 @@ def find_game(explicit=None):
     if os.environ.get("DST_DIR"):
         cands.append(os.environ["DST_DIR"])
     cands.append(os.path.dirname(BASE))                     # script dropped inside the game folder
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
-        steam = winreg.QueryValueEx(key, "SteamPath")[0]
-        roots = [steam]
-        vdf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
-        if os.path.isfile(vdf):
-            roots += re.findall(r'"path"\s+"([^"]+)"', _read(vdf))
-        for r in roots:
-            cands.append(os.path.join(r.replace("\\\\", "\\"), "steamapps", "common",
-                                      "Don't Starve Together"))
-    except OSError:
-        pass
-    cands += [r"C:\Program Files (x86)\Steam\steamapps\common\Don't Starve Together",
-              r"C:\Program Files\Steam\steamapps\common\Don't Starve Together"]
+    for r in _steam_roots():
+        r = r.replace("\\\\", "\\") if IS_WIN else r
+        cands.append(os.path.join(r, "steamapps", "common", GAME_NAME))
     for c in cands:
-        if c and os.path.isfile(os.path.join(c, "bin64", "steam_api64.dll")):
+        if c and find_lib(c):
             return os.path.abspath(c)
     return None
 
@@ -86,16 +122,20 @@ def build_version():
 
 
 class Steam:
-    """Mints an auth session ticket through steam_api64.dll; the game is never started."""
+    """Mints an auth session ticket through the Steamworks library; the game is never started."""
 
-    def __init__(self):
-        dll = os.path.join(GAME_DIR, "bin64", "steam_api64.dll")
+    def __init__(self, lib=None):
+        path = lib or find_lib(GAME_DIR)
+        if not path:
+            raise RuntimeError(
+                f"Steamworks library not found under {GAME_DIR}. "
+                "Install DST for this OS, or point --game at the right folder.")
         work = os.path.join(BASE, "steamctx")
         os.makedirs(work, exist_ok=True)
         with open(os.path.join(work, "steam_appid.txt"), "w", encoding="utf-8") as f:
             f.write("322330")
         os.chdir(work)                      # SteamAPI_Init reads steam_appid.txt from cwd
-        self.api = ctypes.WinDLL(dll)
+        self.api = ctypes.WinDLL(path) if IS_WIN else ctypes.CDLL(path)
         self.api.SteamAPI_Init.restype = ctypes.c_bool
         if not self.api.SteamAPI_Init():
             raise RuntimeError(
@@ -259,12 +299,12 @@ def daemon(kl, state):
         time.sleep(TICK_INTERVAL)
 
 
-def open_steam(timeout=600):
+def open_steam(lib=None, timeout=600):
     """A logon task can fire before Steam is ready, so keep retrying instead of dying."""
     deadline = time.time() + timeout
     while True:
         try:
-            return Steam()
+            return Steam(lib)
         except Exception as e:
             if time.time() >= deadline:
                 raise
@@ -279,7 +319,13 @@ def selftest():
     assert dt.weekday() == 3 and (dt.hour, dt.minute) == (21, 40), dt
     # Heartbeat interval constant as stored in the client, decoded as float, must be 360 s
     assert struct.unpack("<f", bytes.fromhex("0000b443"))[0] == TICK_INTERVAL
-    print("selftest ok")
+    # 平台分支：Windows 找 .dll，其他平台找 .so
+    win_lib = "bin64/steam_api64.dll".replace("/", os.sep)
+    nix_lib = "lib64/libsteam_api.so".replace("/", os.sep)
+    want = win_lib if IS_WIN else nix_lib
+    assert lib_candidates("game")[0] == os.path.join("game", want), lib_candidates("game")
+    assert find_lib("no-such-folder") is None
+    print(f"selftest ok (platform={'windows' if IS_WIN else 'posix'}, lib={want})")
 
 
 def main():
@@ -287,6 +333,7 @@ def main():
     ap = argparse.ArgumentParser(
         description="Collect Don't Starve Together drops without launching the game.")
     ap.add_argument("--game", help="path to the DST install folder")
+    ap.add_argument("--lib", help="path to steam_api64.dll or libsteam_api.so")
     ap.add_argument("--once", action="store_true", help="run a single cycle and exit")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
@@ -300,7 +347,7 @@ def main():
         sys.exit("Could not find Don't Starve Together. Pass --game \"<path to the game folder>\".")
     log(f"game folder: {GAME_DIR}")
 
-    steam = open_steam()
+    steam = open_steam(args.lib)
     kl = Klei(steam)
     state = load_state()
     if args.once:

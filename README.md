@@ -63,7 +63,26 @@ python dst_gift_bot.py --game "D:\Steam\steamapps\common\Don't Starve Together"
 python dst_gift_bot.py
 ```
 
-### 開機自動啟動（工作排程）
+### 跑到 Linux／VM（選用）
+
+同一個腳本也能在 Linux 跑，靠的是 Linux 版 DST 附的 `libsteam_api.so`。該機器上要有一個
+**已登入的 Linux 版 Steam 用戶端**（Steam 就是工作階段本身，這點跟 Windows 一樣）。
+
+```bash
+python3 dst_gift_bot.py --game ~/.steam/steam/steamapps/common/"Don't Starve Together"
+```
+
+腳本會依平台自動挑 `bin64/steam_api64.dll` 或 `lib64/libsteam_api.so`，也可以用 `--lib` 指定。
+要常駐：
+
+```bash
+sudo cp dst-gift-bot.service /etc/systemd/system/
+sudo systemctl enable --now dst-gift-bot
+```
+
+（`WorkingDirectory` 與 `User` 記得照你的環境改。）
+
+### 開機自動啟動（Windows 工作排程）
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-task.ps1

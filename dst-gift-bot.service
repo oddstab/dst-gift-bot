@@ -1,0 +1,16 @@
+[Unit]
+Description=Don't Starve Together gift bot (no game window)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dst-gift-bot
+ExecStart=/usr/bin/python3 /opt/dst-gift-bot/dst_gift_bot.py
+Restart=always
+RestartSec=60
+# 需要一個已登入 Linux 版 Steam 的使用者
+User=steam
+
+[Install]
+WantedBy=default.target
