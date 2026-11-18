@@ -131,7 +131,19 @@ Mod `Drops Reset Countdown` 的算法也一致：
 `scripts\widgets\dropscountdownwidget.lua:27-31` 把重置定在 `21:40`，
 `:52` 把每週重置定在 `weekday=4`（Lua 的 `%w`，4 = 星期四）。
 
-### A.5 為什麼「掛機」有效
+### A.5 未開的禮物盒會封鎖掉落
+
+掛機一整天後 `Tick` 開始連續回 `E_UNOPENED_ITEMS`，掉落完全停止。開掉那個盒子之後，
+**下一次心跳立刻回 `GiftReceived: true`**，把排隊的那件補發出來。所以規則是：
+
+- 庫存裡有未開的盒子 → 伺服器拒絕發新的掉落
+- 未開盒在 `GetAllItems` 裡的特徵是 `Context != 1`（一般物品是 1，未開盒是 3）
+- 開啟用 `POST clientitems/DST/SetItemOpened`，body `{"ClientToken": ..., "ItemID": <int64>}`
+
+欄位名是大寫 `ItemID`。送小寫 `item_id` 不會報錯，會回 `{"Error":false,"ItemID":0}`——
+看起來像成功，實際上什麼都沒做。這個坑很容易踩。
+
+### A.6 為什麼「掛機」有效
 
 遊戲在世界中時，客戶端每 360 秒打一次 `Tick`；item server 收到就記一段遊玩時間，
 累積到門檻就回 `GiftReceived:true` 並把禮物加進帳號庫存。
