@@ -33,6 +33,9 @@ INVENTORY_CHECK_EVERY = 6              # every 6 heartbeats (36 min)
 STATE_PATH = os.path.join(BASE, "state.json")
 LOG_PATH = os.path.join(BASE, "dst_gift_bot.log")
 LOCK_PATH = os.path.join(BASE, "dst_gift_bot.lock")
+CONFIG_PATH = os.path.join(BASE, "config.json")
+WEEK_ANCHOR = 1767303600        # 已知的週四 21:40 UTC，用來推算每週重置邊界
+CONFIG = {}
 
 ITEMS_URL = "https://items.kleientertainment.com/clientitems/DST/"
 LOGIN_URL = "https://login.kleientertainment.com/login/LoginViaSteam"
@@ -50,6 +53,37 @@ def log(msg):
 def _read(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
+
+
+def load_config():
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def notify(title, text=""):
+    """可選的推播。沒設定就什麼都不做；失敗只記一行，不影響掛機。"""
+    msg = f"{title}\n{text}".strip()
+    try:
+        url = CONFIG.get("discord_webhook") or os.environ.get("DST_DISCORD_WEBHOOK")
+        if url:
+            _post_json(url, {"content": msg})
+        tg = CONFIG.get("telegram") or {}
+        tok = tg.get("token") or os.environ.get("DST_TELEGRAM_TOKEN")
+        chat = tg.get("chat_id") or os.environ.get("DST_TELEGRAM_CHAT_ID")
+        if tok and chat:
+            _post_json(f"https://api.telegram.org/bot{tok}/sendMessage",
+                       {"chat_id": chat, "text": msg, "disable_web_page_preview": True})
+    except Exception as e:
+        log(f"notify failed: {e}")
+
+
+def _post_json(url, payload):
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    urllib.request.urlopen(req, timeout=10).read()
 
 
 IS_WIN = sys.platform.startswith("win")
@@ -253,7 +287,31 @@ def record_gifts(state, result, source):
             "item": result.get("ItemType")}
     state["gifts"].append(gift)
     log(f"GIFT RECEIVED via {source}: {gift}")
+    notify("DST gift received", f"{gift.get('item') or gift.get('key')} ({source})")
     return True
+
+
+def week_bounds(now=None):
+    """目前這一週的起訖時間（週四 21:40 UTC 重置）。"""
+    now = int(now or time.time())
+    start = now - ((now - WEEK_ANCHOR) % (7 * 86400))
+    return start, start + 7 * 86400
+
+
+def stats(state):
+    start, end = week_bounds()
+    now = int(time.time())
+    weekly = [g for g in state["gifts"] if g["time"] >= start]
+    fmt = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    print(f"week      {fmt(start)} -> {fmt(end)}")
+    print(f"drops     {len(weekly)}/8 this week")
+    print(f"reset in  {int((end - now) // 3600)}h {int((end - now) % 3600 // 60)}m")
+    print(f"total     {len(state['gifts'])} gifts, {state['ticks']} heartbeats, "
+          f"{state['item_count']} items")
+    if weekly:
+        print("recent:")
+        for g in weekly[-5:]:
+            print(f"  {fmt(g['time'])}  {g.get('item') or g.get('key')}  [{g['source']}]")
 
 
 def check_inventory(kl, state, auto_open=True):
@@ -314,23 +372,42 @@ def run_once(kl, state, check_inv=True, auto_open=True):
 
 def daemon(kl, state, auto_open=True):
     last_daily = 0
+    failures = 0
     log(f"daemon started, one heartbeat every {TICK_INTERVAL} s")
     while True:
+        delay = TICK_INTERVAL
         try:
             # The Klei token expires after ~10-15 minutes, so log in every cycle
             kl.login()
-            run_once(kl, state, check_inv=(state["ticks"] % INVENTORY_CHECK_EVERY == 0),
-                     auto_open=auto_open)
+            result = run_once(kl, state, check_inv=(state["ticks"] % INVENTORY_CHECK_EVERY == 0),
+                              auto_open=auto_open)
+            if result and result.get("Error"):
+                failures += 1
+            else:
+                failures = 0
             if time.time() - last_daily > DAILY_CHECK_INTERVAL:
                 record_gifts(state, kl.daily_gift(), "daily")
                 save_state(state)
                 last_daily = time.time()
-        except Exception as e:              # network hiccups: log and back off
-            log(f"error: {e}")
-            time.sleep(60)
+        except Exception as e:              # 網路或 Steam 出問題：指數退避後重試
+            failures += 1
+            delay = min(60 * 2 ** (failures - 1), 900)
+            log(f"error: {e} (failures={failures}, retry in {delay}s)")
+            if failures == 3:
+                notify("DST bot keeps failing", str(e))
         finally:
             kl.steam.keepalive()
-        time.sleep(TICK_INTERVAL)
+
+        # 連續失敗到這個程度，光重試沒用，直接把 Steam 連線重建一次
+        if failures >= 5:
+            log("rebuilding Steam connection")
+            try:
+                kl.steam = open_steam()
+                failures = 0
+            except Exception as e:
+                log(f"rebuild failed: {e}")
+
+        time.sleep(delay)
 
 
 def acquire_lock():
@@ -387,7 +464,8 @@ def selftest():
 
 
 def main():
-    global GAME_DIR
+    global GAME_DIR, CONFIG
+    CONFIG = load_config()
     ap = argparse.ArgumentParser(
         description="Collect Don't Starve Together drops without launching the game.")
     ap.add_argument("--game", help="path to the DST install folder")
@@ -395,11 +473,15 @@ def main():
     ap.add_argument("--once", action="store_true", help="run a single cycle and exit")
     ap.add_argument("--no-auto-open", action="store_true",
                     help="leave gift boxes wrapped (they will block further drops)")
+    ap.add_argument("--stats", action="store_true", help="print this week's progress and exit")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
     if args.selftest:
         selftest()
+        return
+    if args.stats:
+        stats(load_state())
         return
 
     lock = acquire_lock()

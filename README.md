@@ -117,6 +117,33 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 
 `Tick` 回傳的 `key`，正好就是庫存裡新增那件物品的 `ItemID`——整條鏈就是這樣對起來的。
 
+## 通知與進度（選用）
+
+複製 `config.example.json` 成 `config.json`，填入 Discord webhook 或 Telegram bot：
+
+```json
+{
+  "discord_webhook": "https://discord.com/api/webhooks/...",
+  "telegram": { "token": "123456:ABC", "chat_id": "12345678" }
+}
+```
+
+收到禮物時推播造型名稱，連續失敗 3 次也會通知。兩個都填就兩邊都送，都不填就完全不送。
+也可以用環境變數 `DST_DISCORD_WEBHOOK`、`DST_TELEGRAM_TOKEN` + `DST_TELEGRAM_CHAT_ID`。
+
+看本週進度（純本機讀檔，不需要 Steam、不連網）：
+
+```bash
+python dst_gift_bot.py --stats
+```
+
+```
+week      2026-11-12 21:40 UTC -> 2026-11-19 21:40 UTC
+drops     7/8 this week
+reset in  27h 50m
+total     7 gifts, 263 heartbeats, 2545 items
+```
+
 ## 常見問題
 
 ### 需要安裝遊戲嗎？

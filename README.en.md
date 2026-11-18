@@ -123,6 +123,34 @@ A real run, with the game closed:
 The `key` returned by `Tick` is exactly the `ItemID` that appears in the inventory —
 that is the whole loop, proven end to end.
 
+## Notifications and progress (optional)
+
+Copy `config.example.json` to `config.json` and fill in a Discord webhook or a Telegram bot:
+
+```json
+{
+  "discord_webhook": "https://discord.com/api/webhooks/...",
+  "telegram": { "token": "123456:ABC", "chat_id": "12345678" }
+}
+```
+
+Each gift is pushed with its skin name, and three consecutive failures raise a warning.
+Fill in both to get both; leave the file out and nothing is sent. Environment variables
+`DST_DISCORD_WEBHOOK`, `DST_TELEGRAM_TOKEN` and `DST_TELEGRAM_CHAT_ID` work too.
+
+See this week's progress (reads the state file only — no Steam, no network):
+
+```bash
+python dst_gift_bot.py --stats
+```
+
+```
+week      2026-11-12 21:40 UTC -> 2026-11-19 21:40 UTC
+drops     7/8 this week
+reset in  27h 50m
+total     7 gifts, 263 heartbeats, 2545 items
+```
+
 ## FAQ
 
 ### Does the game need to be installed?

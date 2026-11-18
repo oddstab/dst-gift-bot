@@ -1,0 +1,8 @@
+{
+  "_comment": "複製這個檔案成 config.json 再填值。整份檔案可以不建，那樣就不會推播。",
+  "discord_webhook": "",
+  "telegram": {
+    "token": "",
+    "chat_id": ""
+  }
+}
