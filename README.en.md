@@ -161,8 +161,9 @@ script logs `E_INVALID_TOKEN` and skips the cycle instead of failing silently.
   Treat it the same as leaving the game minimised overnight.
 - The weekly cap is 8 timed drops (plus 1 daily). This tool does not raise that cap, it just
   reaches it without a game window.
-- Gifts are collected, not opened. Turning a gift box into a skin is a separate call
-  (`/clientitems/DST/SetItemOpened`) that is not implemented.
+- Gift boxes are **opened automatically**. An unopened box blocks every later drop (the
+  heartbeat returns `E_UNOPENED_ITEMS`), so the bot opens them on sight and sweeps leftovers
+  during the inventory check. Use `--no-auto-open` to keep them wrapped.
 
 ## Documentation
 

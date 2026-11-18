@@ -228,6 +228,11 @@ class Klei:
         })
         return res.get("Items", []) if not res.get("Error") else None
 
+    def open_gift(self, item_id):
+        # 欄位名是大寫 ItemID；送小寫 item_id 會被忽略並回 ItemID 0，看起來像成功但什麼都沒做
+        return self._post(ITEMS_URL + "SetItemOpened",
+                          {"ClientToken": self.token, "ItemID": item_id})[1]
+
 
 def load_state():
     if os.path.exists(STATE_PATH):
@@ -244,13 +249,14 @@ def save_state(state):
 def record_gifts(state, result, source):
     if not result.get("GiftReceived"):
         return False
-    gift = {"time": int(time.time()), "source": source, "key": result.get("Key")}
+    gift = {"time": int(time.time()), "source": source, "key": result.get("Key"),
+            "item": result.get("ItemType")}
     state["gifts"].append(gift)
     log(f"GIFT RECEIVED via {source}: {gift}")
     return True
 
 
-def check_inventory(kl, state):
+def check_inventory(kl, state, auto_open=True):
     items = kl.inventory()
     if items is None:
         log("inventory query failed")
@@ -260,13 +266,37 @@ def check_inventory(kl, state):
         log(f"inventory grew {state['item_count']} -> {count}")
     state["item_count"] = count
     log(f"holding {count} items")
+    if auto_open:
+        open_pending(kl, items)
 
 
-def run_once(kl, state, check_inv=True):
+def open_pending(kl, items=None):
+    """未開的禮物盒會讓之後的掉落全部卡住（心跳回 E_UNOPENED_ITEMS），所以收到就開。"""
+    if items is None:
+        items = kl.inventory() or []
+    opened = 0
+    for i in items:
+        if i.get("Context", 1) == 1:        # Context 1 = 一般物品，其他值 = 未開盒
+            continue
+        item_id, item_type = i["ItemID"], i.get("ItemType", "?")
+        res = kl.open_gift(item_id)
+        if res.get("Error"):
+            log(f"could not open {item_type} ({item_id}): {res.get('ErrorCode')}")
+        else:
+            log(f"opened {item_type} ({item_id})")
+            opened += 1
+    return opened
+
+
+def run_once(kl, state, check_inv=True, auto_open=True):
     result = kl.tick()
     if result.get("ErrorCode") == "E_INVALID_TOKEN":
         kl.login()
         result = kl.tick()
+    if result.get("ErrorCode") == "E_UNOPENED_ITEMS" and auto_open:
+        log("drops blocked by unopened gifts, clearing them first")
+        if open_pending(kl):
+            result = kl.tick()
     state["ticks"] += 1
     state["last_tick"] = int(time.time())
     if not record_gifts(state, result, "tick"):
@@ -274,20 +304,23 @@ def run_once(kl, state, check_inv=True):
             log(f"heartbeat #{state['ticks']} failed: {result.get('ErrorCode') or result}")
         else:
             log(f"heartbeat #{state['ticks']} ok")
+    elif auto_open:
+        open_pending(kl)
     if check_inv:
-        check_inventory(kl, state)
+        check_inventory(kl, state, auto_open)
     save_state(state)
     return result
 
 
-def daemon(kl, state):
+def daemon(kl, state, auto_open=True):
     last_daily = 0
     log(f"daemon started, one heartbeat every {TICK_INTERVAL} s")
     while True:
         try:
             # The Klei token expires after ~10-15 minutes, so log in every cycle
             kl.login()
-            run_once(kl, state, check_inv=(state["ticks"] % INVENTORY_CHECK_EVERY == 0))
+            run_once(kl, state, check_inv=(state["ticks"] % INVENTORY_CHECK_EVERY == 0),
+                     auto_open=auto_open)
             if time.time() - last_daily > DAILY_CHECK_INTERVAL:
                 record_gifts(state, kl.daily_gift(), "daily")
                 save_state(state)
@@ -360,6 +393,8 @@ def main():
     ap.add_argument("--game", help="path to the DST install folder")
     ap.add_argument("--lib", help="path to steam_api64.dll or libsteam_api.so")
     ap.add_argument("--once", action="store_true", help="run a single cycle and exit")
+    ap.add_argument("--no-auto-open", action="store_true",
+                    help="leave gift boxes wrapped (they will block further drops)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
@@ -382,10 +417,10 @@ def main():
     state = load_state()
     if args.once:
         kl.login()
-        run_once(kl, state)
+        run_once(kl, state, auto_open=not args.no_auto_open)
         log(f"done: {state['ticks']} heartbeats total, {state['item_count']} items")
     else:
-        daemon(kl, state)
+        daemon(kl, state, auto_open=not args.no_auto_open)
 
 
 if __name__ == "__main__":
