@@ -286,9 +286,15 @@ def record_gifts(state, result, source):
     gift = {"time": int(time.time()), "source": source, "key": result.get("Key"),
             "item": result.get("ItemType")}
     state["gifts"].append(gift)
-    log(f"GIFT RECEIVED via {source}: {gift}")
-    notify("DST gift received", f"{gift.get('item') or gift.get('key')} ({source})")
+    label = gift.get("item") or gift.get("key") or "no item info"
+    log(f"GIFT RECEIVED via {source}: {label}  (week {week_count(state)}/8)")
+    notify("DST gift received", f"{label} ({source})")
     return True
+
+
+def week_count(state):
+    start, _ = week_bounds()
+    return sum(1 for g in state["gifts"] if g["time"] >= start)
 
 
 def week_bounds(now=None):
@@ -361,7 +367,8 @@ def run_once(kl, state, check_inv=True, auto_open=True):
         if result.get("Error"):
             log(f"heartbeat #{state['ticks']} failed: {result.get('ErrorCode') or result}")
         else:
-            log(f"heartbeat #{state['ticks']} ok")
+            log(f"heartbeat #{state['ticks']} ok  "
+                f"(week {week_count(state)}/8, total {len(state['gifts'])})")
     elif auto_open:
         open_pending(kl)
     if check_inv:
@@ -386,7 +393,12 @@ def daemon(kl, state, auto_open=True):
             else:
                 failures = 0
             if time.time() - last_daily > DAILY_CHECK_INTERVAL:
-                record_gifts(state, kl.daily_gift(), "daily")
+                if not record_gifts(state, kl.daily_gift(), "daily"):
+                    # 每天只在第一次檢查時記一行，免得日誌被「還沒有」灌滿
+                    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+                    if state.get("daily_checked") != today:
+                        log(f"daily gift: nothing available yet ({today} UTC)")
+                        state["daily_checked"] = today
                 save_state(state)
                 last_daily = time.time()
         except Exception as e:              # 網路或 Steam 出問題：指數退避後重試
