@@ -292,9 +292,16 @@ def record_gifts(state, result, source):
     return True
 
 
-def week_count(state):
+def week_counts(state):
+    """(計時掉落, 每日禮物, 本週全部)。8 件上限只算計時掉落，每日禮物是額外的。"""
     start, _ = week_bounds()
-    return sum(1 for g in state["gifts"] if g["time"] >= start)
+    w = [g for g in state["gifts"] if g["time"] >= start]
+    return (sum(1 for g in w if g["source"] == "tick"),
+            sum(1 for g in w if g["source"] == "daily"), w)
+
+
+def week_count(state):
+    return week_counts(state)[0]
 
 
 def week_bounds(now=None):
@@ -307,10 +314,10 @@ def week_bounds(now=None):
 def stats(state):
     start, end = week_bounds()
     now = int(time.time())
-    weekly = [g for g in state["gifts"] if g["time"] >= start]
+    timed, daily, weekly = week_counts(state)
     fmt = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"week      {fmt(start)} -> {fmt(end)}")
-    print(f"drops     {len(weekly)}/8 this week")
+    print(f"drops     {timed}/8 timed + {daily} daily")
     print(f"reset in  {int((end - now) // 3600)}h {int((end - now) % 3600 // 60)}m")
     print(f"total     {len(state['gifts'])} gifts, {state['ticks']} heartbeats, "
           f"{state['item_count']} items")
