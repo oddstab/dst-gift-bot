@@ -131,6 +131,25 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 收到礼物时推送皮肤名，连续失败 3 次也会通知。两个都填就两边都发，都不填就完全不发。
 也可以用环境变量 `DST_DISCORD_WEBHOOK`、`DST_TELEGRAM_TOKEN` + `DST_TELEGRAM_CHAT_ID`。
 
+设置好 Telegram 之后，可以直接对机器人下指令：
+
+| 指令 | 作用 |
+|---|---|
+| `/stats` | 本周进度条、重置倒计时、库存与累积时长 |
+| `/last` | 最近 5 件 |
+| `/help` | 指令说明 |
+
+```
+DST · 每週 8 件計時掉落
+[███████░]  7/8
+重置：Fri 2026-11-20 05:40（還有 8h 57m）
+每日禮物：2 件
+庫存 2547 件 · 心跳 452 次（1d 21h）
+```
+
+> 一个 bot token 同时只能有一个程序在收指令（Telegram `getUpdates` 的限制），
+> 所以不要让别的程序轮询同一个 token。
+
 查看本周进度（纯本地读文件，不需要 Steam、不联网）：
 
 ```bash

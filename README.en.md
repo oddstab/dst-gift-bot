@@ -138,6 +138,25 @@ Each gift is pushed with its skin name, and three consecutive failures raise a w
 Fill in both to get both; leave the file out and nothing is sent. Environment variables
 `DST_DISCORD_WEBHOOK`, `DST_TELEGRAM_TOKEN` and `DST_TELEGRAM_CHAT_ID` work too.
 
+With Telegram configured you can also talk to the bot:
+
+| Command | What it does |
+|---|---|
+| `/stats` | weekly progress bar, reset countdown, inventory and accrued time |
+| `/last` | the last five gifts |
+| `/help` | the command list |
+
+```
+DST · 每週 8 件計時掉落
+[███████░]  7/8
+重置：Fri 2026-11-20 05:40（還有 8h 57m）
+每日禮物：2 件
+庫存 2547 件 · 心跳 452 次（1d 21h）
+```
+
+> Only one process can poll a bot token at a time (Telegram `getUpdates` limitation), so do
+> not point another program at the same token.
+
 See this week's progress (reads the state file only — no Steam, no network):
 
 ```bash

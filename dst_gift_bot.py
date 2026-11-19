@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -34,6 +35,7 @@ STATE_PATH = os.path.join(BASE, "state.json")
 LOG_PATH = os.path.join(BASE, "dst_gift_bot.log")
 LOCK_PATH = os.path.join(BASE, "dst_gift_bot.lock")
 CONFIG_PATH = os.path.join(BASE, "config.json")
+TG_API = os.environ.get("DST_TELEGRAM_API_BASE", "https://api.telegram.org")
 WEEK_ANCHOR = 1767303600        # 已知的週四 21:40 UTC，用來推算每週重置邊界
 CONFIG = {}
 
@@ -342,6 +344,72 @@ def stats(state):
             print(f"  {local_time(g['time'])}  {g.get('item') or g.get('key')}  [{g['source']}]")
 
 
+def progress_bar(value, total=8):
+    filled = max(0, min(total, value))
+    return "█" * filled + "░" * (total - filled)
+
+
+def render_progress(state):
+    start, end = week_bounds()
+    now = int(time.time())
+    timed, daily, weekly = week_counts(state)
+    lines = [
+        "DST · 每週 8 件計時掉落",
+        f"[{progress_bar(timed)}]  {timed}/8",
+        f"重置：{local_time(end, True)}（還有 {human_duration(end - now)}）",
+        f"每日禮物：{daily} 件",
+        f"庫存 {state['item_count']} 件 · 心跳 {state['ticks']} 次"
+        f"（{human_duration(state['ticks'] * TICK_INTERVAL)}）",
+    ]
+    recent = weekly[-3:]
+    if recent:
+        lines.append("最近：")
+        for g in reversed(recent):
+            lines.append(f"  {local_time(g['time'])}  {g.get('item') or '每日禮物'}")
+    return "\n".join(lines)
+
+
+def telegram_send(token, chat, text):
+    _post_json(f"{TG_API}/bot{token}/sendMessage",
+               {"chat_id": chat, "text": text, "disable_web_page_preview": True})
+
+
+def telegram_loop(state):
+    """長輪詢 Telegram，讓 /stats 隨時可查。只有設定了 token 與 chat_id 才會啟動。"""
+    tg = CONFIG.get("telegram") or {}
+    token = tg.get("token") or os.environ.get("DST_TELEGRAM_TOKEN")
+    chat = tg.get("chat_id") or os.environ.get("DST_TELEGRAM_CHAT_ID")
+    if not (token and chat):
+        return
+    log("telegram listener started")
+    offset = 0
+    while True:
+        try:
+            with urllib.request.urlopen(
+                    f"{TG_API}/bot{token}/getUpdates?timeout=30&offset={offset}", timeout=40) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+            for upd in data.get("result", []):
+                offset = max(offset, int(upd.get("update_id", 0)) + 1)
+                msg = upd.get("message") or {}
+                if str((msg.get("chat") or {}).get("id")) != str(chat):
+                    continue                    # 只理會設定的那個對話
+                text = (msg.get("text") or "").strip().lower()
+                if text.startswith(("/stats", "/status")):
+                    telegram_send(token, chat, render_progress(state))
+                elif text.startswith("/last"):
+                    timed, daily, weekly = week_counts(state)
+                    tail = weekly[-5:] or state["gifts"][-5:]
+                    body = "\n".join(f"{local_time(g['time'])}  {g.get('item') or '每日禮物'}"
+                                     for g in reversed(tail)) or "還沒有紀錄"
+                    telegram_send(token, chat, body)
+                elif text.startswith("/help"):
+                    telegram_send(token, chat,
+                                  "/stats  本週進度\n/last   最近幾件\n/help   這份說明")
+        except Exception as e:
+            log(f"telegram poll error: {e}")
+            time.sleep(10)
+
+
 def check_inventory(kl, state, auto_open=True):
     items = kl.inventory()
     if items is None:
@@ -404,6 +472,8 @@ def daemon(kl, state, auto_open=True):
     last_daily = 0
     failures = 0
     log(f"daemon started, one heartbeat every {TICK_INTERVAL} s")
+    if (CONFIG.get("telegram") or {}).get("token") or os.environ.get("DST_TELEGRAM_TOKEN"):
+        threading.Thread(target=telegram_loop, args=(state,), daemon=True).start()
     while True:
         delay = TICK_INTERVAL
         try:

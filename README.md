@@ -131,6 +131,25 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 收到禮物時推播造型名稱，連續失敗 3 次也會通知。兩個都填就兩邊都送，都不填就完全不送。
 也可以用環境變數 `DST_DISCORD_WEBHOOK`、`DST_TELEGRAM_TOKEN` + `DST_TELEGRAM_CHAT_ID`。
 
+設定 Telegram 之後，可以直接對機器人下指令：
+
+| 指令 | 作用 |
+|---|---|
+| `/stats` | 本週進度條、重置倒數、庫存與累積時數 |
+| `/last` | 最近 5 件 |
+| `/help` | 指令說明 |
+
+```
+DST · 每週 8 件計時掉落
+[███████░]  7/8
+重置：Fri 2026-11-20 05:40（還有 8h 57m）
+每日禮物：2 件
+庫存 2547 件 · 心跳 452 次（1d 21h）
+```
+
+> 一個 bot token 同時只能有一個程式在收指令（Telegram `getUpdates` 的限制），
+> 所以不要讓別的程式輪詢同一個 token。
+
 看本週進度（純本機讀檔，不需要 Steam、不連網）：
 
 ```bash
