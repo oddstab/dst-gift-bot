@@ -145,10 +145,10 @@ python dst_gift_bot.py --stats
 ```
 
 ```
-week      2026-11-12 21:40 UTC -> 2026-11-19 21:40 UTC
-drops     7/8 this week
-reset in  27h 50m
-total     7 gifts, 263 heartbeats, 2545 items
+week      2026-11-13 05:40 -> 2026-11-20 05:40  (local)
+drops     7/8 timed + 2 daily
+reset in  21h 05m  (Fri 2026-11-20 05:40 local)
+total     9 gifts, 331 heartbeats (1d 09h), 2547 items
 ```
 
 ## FAQ

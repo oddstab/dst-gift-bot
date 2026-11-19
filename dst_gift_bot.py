@@ -292,6 +292,22 @@ def record_gifts(state, result, source):
     return True
 
 
+def human_duration(seconds):
+    d, r = divmod(int(seconds), 86400)
+    h, r = divmod(r, 3600)
+    m = r // 60
+    if d:
+        return f"{d}d {h:02d}h"
+    if h:
+        return f"{h}h {m:02d}m"
+    return f"{m}m"
+
+
+def local_time(epoch, with_weekday=False):
+    fmt = "%a %Y-%m-%d %H:%M" if with_weekday else "%Y-%m-%d %H:%M"
+    return datetime.datetime.fromtimestamp(epoch).strftime(fmt)
+
+
 def week_counts(state):
     """(計時掉落, 每日禮物, 本週全部)。8 件上限只算計時掉落，每日禮物是額外的。"""
     start, _ = week_bounds()
@@ -315,16 +331,15 @@ def stats(state):
     start, end = week_bounds()
     now = int(time.time())
     timed, daily, weekly = week_counts(state)
-    fmt = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    print(f"week      {fmt(start)} -> {fmt(end)}")
+    print(f"week      {local_time(start)} -> {local_time(end)}  (local)")
     print(f"drops     {timed}/8 timed + {daily} daily")
-    print(f"reset in  {int((end - now) // 3600)}h {int((end - now) % 3600 // 60)}m")
-    print(f"total     {len(state['gifts'])} gifts, {state['ticks']} heartbeats, "
-          f"{state['item_count']} items")
+    print(f"reset in  {human_duration(end - now)}  ({local_time(end, True)} local)")
+    print(f"total     {len(state['gifts'])} gifts, {state['ticks']} heartbeats "
+          f"({human_duration(state['ticks'] * TICK_INTERVAL)}), {state['item_count']} items")
     if weekly:
         print("recent:")
         for g in weekly[-5:]:
-            print(f"  {fmt(g['time'])}  {g.get('item') or g.get('key')}  [{g['source']}]")
+            print(f"  {local_time(g['time'])}  {g.get('item') or g.get('key')}  [{g['source']}]")
 
 
 def check_inventory(kl, state, auto_open=True):
@@ -375,7 +390,8 @@ def run_once(kl, state, check_inv=True, auto_open=True):
             log(f"heartbeat #{state['ticks']} failed: {result.get('ErrorCode') or result}")
         else:
             log(f"heartbeat #{state['ticks']} ok  "
-                f"(week {week_count(state)}/8, total {len(state['gifts'])})")
+                f"(week {week_count(state)}/8, total {len(state['gifts'])}, "
+                f"{human_duration(state['ticks'] * TICK_INTERVAL)} accrued)")
     elif auto_open:
         open_pending(kl)
     if check_inv:
