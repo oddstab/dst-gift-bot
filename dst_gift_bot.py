@@ -44,7 +44,8 @@ CONFIG = {}
 SKIN_NAMES = {}                 # prefab -> 英文名（遊戲自己的 skin_strings.lua）
 SKIN_ZH = {}                    # 英文名 -> 繁中名（chinese_t.po）
 ICON_CACHE_PATH = os.path.join(BASE, "icons.json")
-ICON_DIR = os.path.join(BASE, "icons")
+# 解碼器一改版就換目錄名，避免吃到舊的快取圖（例：v2 = 修正上下顛倒之後）
+ICON_DIR = os.path.join(BASE, "icons_v2")
 ICON_CACHE = {}                 # PREFAB -> 本機產生的 PNG 路徑
 
 SLOT_EMOJI = {"BODY": "👕", "LEGS": "👖", "FEET": "👟", "HAND": "🧤", "HEAD": "🎩",

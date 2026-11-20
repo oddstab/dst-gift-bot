@@ -7,4 +7,4 @@ steamctx/
 __pycache__/
 *.pyc
 icons.json
-icons/
+icons*/

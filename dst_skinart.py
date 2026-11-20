@@ -99,7 +99,12 @@ def ktex_to_rgba(tex):
         for bx in range(w // 4):
             _bc3_block(tex[pos:pos + 16], rgba, w, bx, by)
             pos += 16
-    return w, h, bytes(rgba)
+    # KTEX 的列是 OpenGL 慣例的 bottom-up，直接照順序輸出會上下顛倒
+    stride = w * 4
+    flipped = bytearray()
+    for y in range(h - 1, -1, -1):
+        flipped += rgba[y * stride:(y + 1) * stride]
+    return w, h, bytes(flipped)
 
 
 def largest_region(rgba, w, h, threshold=ALPHA_THRESHOLD):
