@@ -25,7 +25,6 @@ import sys
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -43,7 +42,6 @@ SKIN_NAMES = {}                 # prefab -> 英文名（遊戲自己的 skin_str
 SKIN_ZH = {}                    # 英文名 -> 繁中名（chinese_t.po）
 ICON_CACHE_PATH = os.path.join(BASE, "icons.json")
 ICON_CACHE = {}                 # PREFAB -> 造型圖 URL
-_market_lock_until = 0          # 被 Steam 限流時的退避截止時間
 
 SLOT_EMOJI = {"BODY": "👕", "LEGS": "👖", "FEET": "👟", "HAND": "🧤", "HEAD": "🎩",
               "DECOR": "🪑", "PROFILEFLAIR": "✨", "PROFILEICON": "🖼", "EMOTE": "💃",
@@ -154,53 +152,15 @@ def save_icons():
 
 
 def resolve_icon(prefab):
-    """造型圖來自 Steam 社群市集：那裡的 hash_name 就是 prefab，還附 icon_url。
+    """造型圖只能來自本地，目前一律回 None。
 
-    一次查詢通常會把同名的所有顏色一起拿回來，所以快取命中率很高。
-    被限流就退避 10 分鐘，之後再試；查不到就退回純文字，不影響掛機。
+    查證結果（詳見 REPORT.md）：anim_dynamic.zip 裡每個造型只有 build.bin，
+    貼圖名寫的是 atlas-0.texs，由引擎在執行時組合，遊戲沒有把造型貼圖單獨存成檔案。
+    在解開 .dyn 容器之前，訊息退回純文字，不連任何外部網站。
     """
-    global _market_lock_until
     if not prefab:
         return None
-    key = prefab.upper()
-    if key in ICON_CACHE:
-        return ICON_CACHE[key] or None
-    name = SKIN_NAMES.get(prefab.lower())
-    if not name:
-        return None
-    now = time.time()
-    if now < _market_lock_until:
-        return None
-    try:
-        url = ("https://steamcommunity.com/market/search/render/?appid=322330&query="
-               + urllib.parse.quote(name) + "&count=100&norender=1")
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "application/json"})
-        data = json.load(urllib.request.urlopen(req, timeout=25))
-        added = 0
-        for row in data.get("results", []):
-            hash_name = row.get("hash_name")
-            icon = (row.get("asset_description") or {}).get("icon_url")
-            if hash_name and icon:
-                ICON_CACHE[hash_name.upper()] = (
-                    f"https://steamcommunity-a.akamaihd.net/economy/image/{icon}/330x192")
-                added += 1
-        if added:
-            save_icons()
-            log(f"icon lookup '{name}': {added} entries")
-        else:
-            ICON_CACHE.setdefault(key, "")
-            save_icons()
-    except urllib.error.HTTPError as e:
-        if e.code == 429:
-            _market_lock_until = now + 600
-            log("steam market rate limited, backing off 10 min")
-        else:
-            log(f"icon lookup failed: HTTP {e.code}")
-    except Exception as e:
-        log(f"icon lookup failed: {e}")
-    return ICON_CACHE.get(key) or None
+    return ICON_CACHE.get(prefab.upper()) or None
 
 ITEMS_URL = "https://items.kleientertainment.com/clientitems/DST/"
 LOGIN_URL = "https://login.kleientertainment.com/login/LoginViaSteam"
@@ -580,10 +540,19 @@ def telegram_setup(token):
         log(f"telegram menu setup failed: {e}")
 
 
-def telegram_send(token, chat, text, html=False):
+MAIN_KEYBOARD = {
+    "keyboard": [[{"text": "📊 本週進度"}, {"text": "🖼 最近掉落"}, {"text": "❓ 說明"}]],
+    "resize_keyboard": True,
+    "is_persistent": True,
+}
+
+
+def telegram_send(token, chat, text, html=False, markup=None):
     payload = {"chat_id": chat, "text": text, "disable_web_page_preview": True}
     if html:
         payload["parse_mode"] = "HTML"
+    if markup:
+        payload["reply_markup"] = markup
     _post_json(f"{TG_API}/bot{token}/sendMessage", payload)
 
 
@@ -618,33 +587,21 @@ def telegram_loop(state):
                 if this_chat != chat:
                     continue                    # 只理會綁定的那個對話
                 text = (msg.get("text") or "").strip().lower()
-                if text.startswith(("/start", "/help")):
-                    telegram_send(token, chat, HELP_TEXT, html=True)
-                elif text.startswith(("/stats", "/status")):
-                    telegram_send(token, chat, render_progress(state), html=True)
-                elif text.startswith("/last"):
+                if text.startswith(("/start", "/help")) or "說明" in text:
+                    telegram_send(token, chat, HELP_TEXT, html=True, markup=MAIN_KEYBOARD)
+                elif text.startswith(("/stats", "/status")) or "進度" in text:
+                    telegram_send(token, chat, render_progress(state), html=True,
+                                  markup=MAIN_KEYBOARD)
+                elif text.startswith("/last") or "最近" in text:
                     _, _, weekly = week_counts(state)
-                    tail = list(reversed(weekly[-5:] or state["gifts"][-5:]))
+                    tail = list(reversed((weekly or state["gifts"])[-8:]))
                     if not tail:
-                        telegram_send(token, chat, "還沒有紀錄")
+                        telegram_send(token, chat, "還沒有紀錄", markup=MAIN_KEYBOARD)
                         continue
-                    album = []
-                    for g in tail:
-                        icon = resolve_icon(g.get("item"))
-                        if icon:
-                            album.append({"type": "photo", "media": icon,
-                                          "caption": f"{esc(gift_label(g))} · "
-                                                     f"{local_time(g['time'])}",
-                                          "parse_mode": "HTML"})
-                            time.sleep(1.5)     # 對 Steam 客氣一點
-                    if album:
-                        _post_json(f"{TG_API}/bot{token}/sendMediaGroup",
-                                   {"chat_id": chat, "media": album})
-                    else:
-                        body = "\n".join(
-                            [f"<b>最近 {len(tail)} 件</b>", ""] +
-                            [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail])
-                        telegram_send(token, chat, body, html=True)
+                    body = "\n".join(
+                        [f"<b>本週 {len(tail)} 件</b>", ""] +
+                        [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail])
+                    telegram_send(token, chat, body, html=True, markup=MAIN_KEYBOARD)
         except Exception as e:
             log(f"telegram poll error: {e}")
             time.sleep(10)

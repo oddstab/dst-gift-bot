@@ -152,6 +152,33 @@ Mod `Drops Reset Countdown` 的算法也一致：
 
 ---
 
+## A.7 本地造型圖考證（結論：沒有獨立圖檔）
+
+想把「拿到什麼」變成圖片，必須先確定遊戲把造型圖存在哪。逐一查證：
+
+| 位置 | 內容 | 是否含造型圖 |
+|---|---|---|
+| `data/databundles/images.zip` → `images/inventoryimages*.xml` | 3394 個道具圖示 | **沒有**任何造型 prefab |
+| `data/images/skinsscreen.xml` | 6 個 UI 按鈕 | 只有介面元件 |
+| `data/bigportraits/` | 377 個角色立繪，命名為 `角色_套裝`（`walter_shadow`） | 只有整隻角色，無單品項 |
+| `data/anim/*.zip`（3598 個） | 每個含 `anim.bin` + `atlas-0.tex` + `build.bin` | 掃描全部 `build.bin`，**沒有任何一個**提到造型 prefab |
+| `data/databundles/anim_dynamic.zip`（3438 個內層 zip） | **每個只有 `build.bin`**，沒有 `.tex` | 幾何有，貼圖沒有 |
+| `data/anim/dynamic/*.dyn`（3626 個，30–50KB） | 混淆過的容器 | zlib / raw deflate / gzip / lzma 全部失敗，0–255 位移皆無法解壓 |
+
+`build.bin` 開頭是 `BILD`，內容包含造型名與 `atlas-0.texs` 這個貼圖集引用；
+真正畫圖的是 `scripts/widgets/itemimage.lua`：
+
+```lua
+self.frame:GetAnimState():OverrideSkinSymbol("SWAP_ICON", buildname, "SWAP_ICON")
+```
+
+所以遊戲內的「靜態圖」其實是 KAnim build 裡的 `SWAP_ICON` 這個 sprite，
+貼圖由引擎在執行時把 `atlas-0.texs` 組出來。**遊戲沒有把造型貼圖存成可直接讀取的檔案**，
+要做出圖片就得實作 KAnim 解碼（build.bin 的 frame 幾何 + 貼圖集組合），
+或先解開 `.dyn` 的混淆格式。
+
+在解開之前，程式一律顯示文字名稱，不連任何外部網站。
+
 ## B. 技術流程圖與必要條件
 
 ```
