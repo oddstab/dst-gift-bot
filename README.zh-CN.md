@@ -152,6 +152,10 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 🪑 精靈頭燈 · 2026-11-20 13:06
 ```
 
+收到礼物时会**附上皮肤图**。图来自 Steam 社区市场（那里的 `hash_name` 就是 prefab，
+`icon_url` 就是官方 item 图），网址缓存在 `icons.json`，同一件皮肤只查一次。
+市场上没有的皮肤（部分活动限定）会自动退回纯文字。
+
 皮肤名称取自游戏自己的字符串表（`scripts/skin_strings.lua` 的 4145 笔），
 繁中翻译来自 `scripts/languages/chinese_t.po`。显示的是官方名称（例：`紐扣襯衫`），
 不是 `BODY_BUTTONS_BLUE_SKY` 这种代码，而且完全离线、不需要连接任何第三方网站。

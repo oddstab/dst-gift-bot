@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +41,9 @@ WEEK_ANCHOR = 1767303600        # 已知的週四 21:40 UTC，用來推算每週
 CONFIG = {}
 SKIN_NAMES = {}                 # prefab -> 英文名（遊戲自己的 skin_strings.lua）
 SKIN_ZH = {}                    # 英文名 -> 繁中名（chinese_t.po）
+ICON_CACHE_PATH = os.path.join(BASE, "icons.json")
+ICON_CACHE = {}                 # PREFAB -> 造型圖 URL
+_market_lock_until = 0          # 被 Steam 限流時的退避截止時間
 
 SLOT_EMOJI = {"BODY": "👕", "LEGS": "👖", "FEET": "👟", "HAND": "🧤", "HEAD": "🎩",
               "DECOR": "🪑", "PROFILEFLAIR": "✨", "PROFILEICON": "🖼", "EMOTE": "💃",
@@ -83,6 +87,70 @@ def skin_label(item_type):
 def esc(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+
+def load_icons():
+    global ICON_CACHE
+    try:
+        with open(ICON_CACHE_PATH, encoding="utf-8") as f:
+            ICON_CACHE = json.load(f)
+    except Exception:
+        ICON_CACHE = {}
+
+
+def save_icons():
+    with open(ICON_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(ICON_CACHE, f, ensure_ascii=False, indent=1)
+
+
+def resolve_icon(prefab):
+    """造型圖來自 Steam 社群市集：那裡的 hash_name 就是 prefab，還附 icon_url。
+
+    一次查詢通常會把同名的所有顏色一起拿回來，所以快取命中率很高。
+    被限流就退避 10 分鐘，之後再試；查不到就退回純文字，不影響掛機。
+    """
+    global _market_lock_until
+    if not prefab:
+        return None
+    key = prefab.upper()
+    if key in ICON_CACHE:
+        return ICON_CACHE[key] or None
+    name = SKIN_NAMES.get(prefab.lower())
+    if not name:
+        return None
+    now = time.time()
+    if now < _market_lock_until:
+        return None
+    try:
+        url = ("https://steamcommunity.com/market/search/render/?appid=322330&query="
+               + urllib.parse.quote(name) + "&count=100&norender=1")
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json"})
+        data = json.load(urllib.request.urlopen(req, timeout=25))
+        added = 0
+        for row in data.get("results", []):
+            hash_name = row.get("hash_name")
+            icon = (row.get("asset_description") or {}).get("icon_url")
+            if hash_name and icon:
+                ICON_CACHE[hash_name.upper()] = (
+                    f"https://steamcommunity-a.akamaihd.net/economy/image/{icon}/330x192")
+                added += 1
+        if added:
+            save_icons()
+            log(f"icon lookup '{name}': {added} entries")
+        else:
+            ICON_CACHE.setdefault(key, "")
+            save_icons()
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            _market_lock_until = now + 600
+            log("steam market rate limited, backing off 10 min")
+        else:
+            log(f"icon lookup failed: HTTP {e.code}")
+    except Exception as e:
+        log(f"icon lookup failed: {e}")
+    return ICON_CACHE.get(key) or None
+
 ITEMS_URL = "https://items.kleientertainment.com/clientitems/DST/"
 LOGIN_URL = "https://login.kleientertainment.com/login/LoginViaSteam"
 
@@ -114,8 +182,8 @@ def save_config():
         json.dump(CONFIG, f, ensure_ascii=False, indent=2)
 
 
-def notify(plain, html=None):
-    """可選的推播。Discord 吃純文字、Telegram 吃 HTML；失敗只記一行，不影響掛機。"""
+def notify(plain, html=None, photo=None):
+    """可選的推播。Discord 吃純文字、Telegram 吃 HTML（有圖就送圖）。"""
     try:
         url = CONFIG.get("discord_webhook") or os.environ.get("DST_DISCORD_WEBHOOK")
         if url:
@@ -123,12 +191,20 @@ def notify(plain, html=None):
         tg = CONFIG.get("telegram") or {}
         tok = tg.get("token") or os.environ.get("DST_TELEGRAM_TOKEN")
         chat = tg.get("chat_id") or os.environ.get("DST_TELEGRAM_CHAT_ID")
-        if tok and chat:
-            payload = {"chat_id": chat, "text": html or plain,
-                       "disable_web_page_preview": True}
-            if html:
-                payload["parse_mode"] = "HTML"
-            _post_json(f"{TG_API}/bot{tok}/sendMessage", payload)
+        if not (tok and chat):
+            return
+        if photo and html:
+            try:
+                _post_json(f"{TG_API}/bot{tok}/sendPhoto",
+                           {"chat_id": chat, "photo": photo, "caption": html,
+                            "parse_mode": "HTML"})
+                return
+            except Exception as e:
+                log(f"photo send failed, falling back to text: {e}")
+        payload = {"chat_id": chat, "text": html or plain, "disable_web_page_preview": True}
+        if html:
+            payload["parse_mode"] = "HTML"
+        _post_json(f"{TG_API}/bot{tok}/sendMessage", payload)
     except Exception as e:
         log(f"notify failed: {e}")
 
@@ -344,7 +420,8 @@ def record_gifts(state, result, source):
         f"  ({label}, week {week_count(state)}/8)")
     notify(f"GIFT {label}",
            f"<b>{esc(label)}</b>\n本週 {week_count(state)}/8 · "
-           f"累積 {human_duration(state['ticks'] * TICK_INTERVAL)}")
+           f"累積 {human_duration(state['ticks'] * TICK_INTERVAL)}",
+           photo=resolve_icon(gift.get("item")))
     return True
 
 
@@ -468,11 +545,26 @@ def telegram_loop(state):
                 elif text.startswith("/last"):
                     _, _, weekly = week_counts(state)
                     tail = list(reversed(weekly[-5:] or state["gifts"][-5:]))
-                    body = "\n".join(
-                        [f"<b>最近 {len(tail)} 件</b>", ""] +
-                        [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail]
-                    ) if tail else "還沒有紀錄"
-                    telegram_send(token, chat, body, html=True)
+                    if not tail:
+                        telegram_send(token, chat, "還沒有紀錄")
+                        continue
+                    album = []
+                    for g in tail:
+                        icon = resolve_icon(g.get("item"))
+                        if icon:
+                            album.append({"type": "photo", "media": icon,
+                                          "caption": f"{esc(gift_label(g))} · "
+                                                     f"{local_time(g['time'])}",
+                                          "parse_mode": "HTML"})
+                            time.sleep(1.5)     # 對 Steam 客氣一點
+                    if album:
+                        _post_json(f"{TG_API}/bot{token}/sendMediaGroup",
+                                   {"chat_id": chat, "media": album})
+                    else:
+                        body = "\n".join(
+                            [f"<b>最近 {len(tail)} 件</b>", ""] +
+                            [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail])
+                        telegram_send(token, chat, body, html=True)
                 elif text.startswith("/help"):
                     telegram_send(token, chat,
                                   "/stats  本週進度\n/last   最近幾件\n/help   這份說明")
@@ -670,6 +762,7 @@ def main():
         sys.exit("Could not find Don't Starve Together. Pass --game \"<path to the game folder>\".")
     log(f"game folder: {GAME_DIR}")
     load_skin_names()
+    load_icons()
 
     steam = open_steam(args.lib)
     kl = Klei(steam)

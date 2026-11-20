@@ -159,6 +159,11 @@ With Telegram configured you can also talk to the bot:
 🪑 精靈頭燈 · 2026-11-20 13:06
 ```
 
+Each gift arrives **with a picture of the item**. The image comes from the Steam Community
+Market, where `hash_name` is the prefab itself and `icon_url` points at the official item art;
+URLs are cached in `icons.json` so each skin is looked up once. Skins that are not listed on
+the market fall back to text.
+
 Skin names come from the game's own string table (`scripts/skin_strings.lua`, 4145 entries)
 with Chinese translations from `scripts/languages/chinese_t.po`. You see the official name
 (`紐扣襯衫`) rather than a prefab code (`BODY_BUTTONS_BLUE_SKY`), entirely offline.

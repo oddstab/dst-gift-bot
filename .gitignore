@@ -6,3 +6,4 @@ dst_gift_bot.lock
 steamctx/
 __pycache__/
 *.pyc
+icons.json
