@@ -244,10 +244,15 @@ def notify(plain, html=None, photo=None):
         log(f"notify failed: {e}")
 
 
-def _post_json(url, payload):
+def _post_json(url, payload, timeout=10):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
     req.add_header("Content-Type", "application/json")
-    urllib.request.urlopen(req, timeout=10).read()
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        body = r.read().decode("utf-8", "replace")
+    try:
+        return json.loads(body)
+    except Exception:
+        return {}
 
 
 def _post_multipart(url, field, file_path, extra=None, timeout=30):
@@ -607,12 +612,22 @@ def telegram_send(token, chat, text, html=False, markup=None):
     _post_json(f"{TG_API}/bot{token}/sendMessage", payload)
 
 
+def http_error_text(exc):
+    """把 HTTPError 的 response body 抓出來，否則只看得到 'Bad Request'。"""
+    try:
+        return f"HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:160]}"
+    except Exception:
+        return str(exc)
+
+
 def telegram_answer(token, callback_id, text=None):
     payload = {"callback_query_id": callback_id}
     if text:
         payload["text"] = text
     try:
         _post_json(f"{TG_API}/bot{token}/answerCallbackQuery", payload, timeout=5)
+    except urllib.error.HTTPError as e:
+        log(f"answerCallbackQuery failed: {http_error_text(e)}")
     except Exception as e:
         log(f"answerCallbackQuery failed: {e}")
 
@@ -658,9 +673,15 @@ def send_card(token, chat, state, index, message_id=None):
     if message_id:
         media = json.dumps({"type": "photo", "media": "attach://photo",
                             "caption": caption, "parse_mode": "HTML"}, ensure_ascii=False)
-        return _post_multipart(f"{TG_API}/bot{token}/editMessageMedia", "photo", path,
-                               {"chat_id": chat, "message_id": message_id,
-                                "media": media, "reply_markup": markup})
+        try:
+            return _post_multipart(f"{TG_API}/bot{token}/editMessageMedia", "photo", path,
+                                   {"chat_id": chat, "message_id": message_id,
+                                    "media": media, "reply_markup": markup})
+        except urllib.error.HTTPError as e:
+            # 訊息太舊或已被刪掉（Telegram 回 400）就改送一張新的，不要讓整輪掛掉
+            log(f"editMessageMedia failed, sending a new card: {http_error_text(e)}")
+        except Exception as e:
+            log(f"editMessageMedia failed, sending a new card: {e}")
     telegram_action(token, chat)
     return _post_multipart(f"{TG_API}/bot{token}/sendPhoto", "photo", path,
                            {"chat_id": chat, "caption": caption,
@@ -687,6 +708,12 @@ def telegram_loop(state):
 
                 cq = upd.get("callback_query")      # 造型卡的翻頁按鈕
                 if cq:
+                    # 重啟後 Telegram 會重播未確認的回呼；超過兩分鐘的按鈕一律忽略，
+                    # 否則 answerCallbackQuery 會一直回 400。
+                    age = time.time() - float((cq.get("message") or {}).get("date") or 0)
+                    if age > 120:
+                        log(f"ignoring stale callback ({int(age)}s old)")
+                        continue
                     cchat = str(((cq.get("message") or {}).get("chat") or {}).get("id") or "")
                     if chat and cchat == chat:
                         payload = cq.get("data") or ""
