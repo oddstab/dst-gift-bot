@@ -157,8 +157,9 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 市场上没有的皮肤（部分活动限定）会自动退回纯文字。
 
 皮肤名称取自游戏自己的字符串表（`scripts/skin_strings.lua` 的 4145 笔），
-繁中翻译来自 `scripts/languages/chinese_t.po`。显示的是官方名称（例：`紐扣襯衫`），
-不是 `BODY_BUTTONS_BLUE_SKY` 这种代码，而且完全离线、不需要连接任何第三方网站。
+繁中翻译来自 `scripts/languages/chinese_t.po`。显示的是官方名称加颜色后缀
+（例：`紐扣襯衫 · Blue Sky`），不是 `BODY_BUTTONS_BLUE_SKY` 这种代码，
+而且完全离线、不需要连接任何第三方网站。后缀只在能确定是颜色时才加——接错比不接更糟。
 
 > 一个 bot token 同时只能有一个程序在收指令（Telegram `getUpdates` 的限制），
 > 所以不要让别的程序轮询同一个 token。

@@ -157,8 +157,9 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 市集上沒有的造型（部分活動限定）會自動退回純文字。
 
 造型名稱取自遊戲自己的字串表（`scripts/skin_strings.lua` 的 4145 筆），
-繁中翻譯來自 `scripts/languages/chinese_t.po`。所以顯示的是官方名稱（例：`紐扣襯衫`），
-不是 `BODY_BUTTONS_BLUE_SKY` 這種代碼，而且完全離線、不需要連任何第三方網站。
+繁中翻譯來自 `scripts/languages/chinese_t.po`。顯示的是官方名稱加顏色後綴
+（例：`紐扣襯衫 · Blue Sky`），不是 `BODY_BUTTONS_BLUE_SKY` 這種代碼，
+而且完全離線、不需要連任何第三方網站。後綴只在能確定是顏色時才接——接錯比不接更糟。
 
 > 一個 bot token 同時只能有一個程式在收指令（Telegram `getUpdates` 的限制），
 > 所以不要讓別的程式輪詢同一個 token。

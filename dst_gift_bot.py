@@ -73,6 +73,56 @@ def load_skin_names():
         log(f"could not read skin names from the game: {e}")
 
 
+def _stem(token):
+    for suffix in ("ies", "es", "s", "ed", "ing"):
+        if len(token) > len(suffix) + 2 and token.endswith(suffix):
+            return token[:-len(suffix)]
+    return token
+
+
+COLOR_WORDS = {
+    "red", "crimson", "orange", "amber", "yellow", "gold", "golden", "green", "lime",
+    "olive", "teal", "cyan", "blue", "navy", "indigo", "purple", "violet", "magenta",
+    "pink", "rose", "white", "ivory", "cream", "black", "grey", "gray", "silver",
+    "brown", "tan", "beige", "ruby", "sapphire", "emerald", "jade", "amethyst",
+    "topaz", "jet", "pearl", "pure", "dark", "light", "pale", "snow", "ash", "mint",
+}
+NOISE_WORDS = {"basic", "none", "default", "set"}
+
+
+def variant_suffix(prefab):
+    """把 prefab 裡「不是造型本名」的部分抓出來，當成顏色後綴。
+
+    BODY_BUTTONS_BLUE_SKY + "Buttoned Shirt" -> "Blue Sky"
+    同一個名稱常對應多種顏色，不接後綴在 Telegram 上會看起來一模一樣。
+    只在能確定是顏色時才接，接錯比不接更糟。
+    """
+    name = SKIN_NAMES.get(prefab.lower())
+    if not name:
+        return ""
+    parts = prefab.split("_")
+    rest = [w for w in parts[1:] if w.lower() not in NOISE_WORDS] if len(parts) > 1 else []
+    stems = {_stem(t) for t in re.split(r"[^a-z0-9]+", name.lower()) if t}
+
+    leftover, matched = [], False
+    for token in rest:
+        s = _stem(token.lower())
+        if any(s and st and (s in st or st in s) for st in stems):
+            matched = True
+            continue
+        leftover.append(token)
+
+    if matched and leftover:
+        return " ".join(w.capitalize() for w in leftover)
+
+    # 本名對不上（Swimming Costume vs SWIMSUIT）或名稱已含全部資訊，
+    # 這時只取最後兩段，而且必須是顏色詞才算數
+    tail = rest[-2:]
+    if len(tail) == 2 and all(w.lower() in COLOR_WORDS for w in tail):
+        return " ".join(w.capitalize() for w in tail)
+    return ""
+
+
 def skin_label(item_type):
     """回傳帶圖示的可讀名稱，例如 '👕 紐扣襯衫'。"""
     if not item_type:
@@ -80,8 +130,9 @@ def skin_label(item_type):
     key = item_type.lower()
     en = SKIN_NAMES.get(key) or item_type.replace("_", " ").title()
     name = SKIN_ZH.get(en, en)
+    suffix = variant_suffix(item_type) if key in SKIN_NAMES else ""
     emoji = SLOT_EMOJI.get(item_type.split("_")[0], "🎁")
-    return f"{emoji} {name}"
+    return f"{emoji} {name} · {suffix}" if suffix else f"{emoji} {name}"
 
 
 def esc(text):
@@ -728,6 +779,14 @@ def selftest():
     want = win_lib if IS_WIN else nix_lib
     assert lib_candidates("game")[0] == os.path.join("game", want), lib_candidates("game")
     assert find_lib("no-such-folder") is None
+    # 顏色後綴：接得出來的要接，接不出來的不能亂接（需要遊戲才有名字表）
+    global GAME_DIR
+    game = GAME_DIR or find_game()
+    if game:
+        GAME_DIR = game
+        load_skin_names()
+        assert variant_suffix("BODY_BUTTONS_BLUE_SKY") == "Blue Sky"
+        assert variant_suffix("LEGS_WORTOX_SURVIVOR") == ""
     print(f"selftest ok (platform={'windows' if IS_WIN else 'posix'}, lib={want})")
 
 

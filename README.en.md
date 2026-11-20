@@ -166,7 +166,8 @@ the market fall back to text.
 
 Skin names come from the game's own string table (`scripts/skin_strings.lua`, 4145 entries)
 with Chinese translations from `scripts/languages/chinese_t.po`. You see the official name
-(`紐扣襯衫`) rather than a prefab code (`BODY_BUTTONS_BLUE_SKY`), entirely offline.
+plus its colour suffix (`紐扣襯衫 · Blue Sky`) rather than a prefab code, entirely offline.
+A suffix is only added when it is recognisably a colour — a wrong one is worse than none.
 
 > Only one process can poll a bot token at a time (Telegram `getUpdates` limitation), so do
 > not point another program at the same token.
