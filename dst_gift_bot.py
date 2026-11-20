@@ -65,6 +65,11 @@ def load_config():
         return {}
 
 
+def save_config():
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(CONFIG, f, ensure_ascii=False, indent=2)
+
+
 def notify(title, text=""):
     """可選的推播。沒設定就什麼都不做；失敗只記一行，不影響掛機。"""
     msg = f"{title}\n{text}".strip()
@@ -378,10 +383,10 @@ def telegram_loop(state):
     """長輪詢 Telegram，讓 /stats 隨時可查。只有設定了 token 與 chat_id 才會啟動。"""
     tg = CONFIG.get("telegram") or {}
     token = tg.get("token") or os.environ.get("DST_TELEGRAM_TOKEN")
-    chat = tg.get("chat_id") or os.environ.get("DST_TELEGRAM_CHAT_ID")
-    if not (token and chat):
+    chat = str(tg.get("chat_id") or os.environ.get("DST_TELEGRAM_CHAT_ID") or "")
+    if not token:
         return
-    log("telegram listener started")
+    log("telegram listener started" + ("" if chat else ", waiting for the first message to bind"))
     offset = 0
     while True:
         try:
@@ -391,8 +396,18 @@ def telegram_loop(state):
             for upd in data.get("result", []):
                 offset = max(offset, int(upd.get("update_id", 0)) + 1)
                 msg = upd.get("message") or {}
-                if str((msg.get("chat") or {}).get("id")) != str(chat):
-                    continue                    # 只理會設定的那個對話
+                this_chat = str((msg.get("chat") or {}).get("id") or "")
+                if not this_chat:
+                    continue
+                if not chat:                    # 還沒綁定：第一則訊息決定擁有者
+                    chat = this_chat
+                    CONFIG.setdefault("telegram", {})["chat_id"] = chat
+                    save_config()
+                    log(f"telegram bound to chat {chat}")
+                    telegram_send(token, chat,
+                                  "已綁定這個對話，之後只回應這裡。\n輸入 /help 看指令。")
+                if this_chat != chat:
+                    continue                    # 只理會綁定的那個對話
                 text = (msg.get("text") or "").strip().lower()
                 if text.startswith(("/stats", "/status")):
                     telegram_send(token, chat, render_progress(state))
