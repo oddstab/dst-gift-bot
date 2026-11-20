@@ -554,6 +554,32 @@ def render_progress(state):
     return "\n".join(lines)
 
 
+TG_COMMANDS = [
+    {"command": "stats", "description": "本週掉落進度與重置倒數"},
+    {"command": "last", "description": "最近 5 件（附造型圖）"},
+    {"command": "help", "description": "指令說明"},
+]
+
+HELP_TEXT = (
+    "<b>DST 禮物機器人</b>\n\n"
+    "/stats  本週進度、重置倒數、庫存與累積時數\n"
+    "/last   最近 5 件（附造型圖）\n"
+    "/help   這份說明\n\n"
+    "背景每 6 分鐘送一次心跳，收到禮物會主動通知。"
+)
+
+
+def telegram_setup(token):
+    """註冊指令清單與輸入框旁的選單按鈕，Telegram 的 / 按鈕就會列出來。"""
+    try:
+        _post_json(f"{TG_API}/bot{token}/setMyCommands", {"commands": TG_COMMANDS})
+        _post_json(f"{TG_API}/bot{token}/setChatMenuButton",
+                   {"menu_button": {"type": "commands"}})
+        log("telegram command menu registered")
+    except Exception as e:
+        log(f"telegram menu setup failed: {e}")
+
+
 def telegram_send(token, chat, text, html=False):
     payload = {"chat_id": chat, "text": text, "disable_web_page_preview": True}
     if html:
@@ -569,6 +595,7 @@ def telegram_loop(state):
     if not token:
         return
     log("telegram listener started" + ("" if chat else ", waiting for the first message to bind"))
+    telegram_setup(token)
     offset = 0
     while True:
         try:
@@ -591,7 +618,9 @@ def telegram_loop(state):
                 if this_chat != chat:
                     continue                    # 只理會綁定的那個對話
                 text = (msg.get("text") or "").strip().lower()
-                if text.startswith(("/stats", "/status")):
+                if text.startswith(("/start", "/help")):
+                    telegram_send(token, chat, HELP_TEXT, html=True)
+                elif text.startswith(("/stats", "/status")):
                     telegram_send(token, chat, render_progress(state), html=True)
                 elif text.startswith("/last"):
                     _, _, weekly = week_counts(state)
@@ -616,9 +645,6 @@ def telegram_loop(state):
                             [f"<b>最近 {len(tail)} 件</b>", ""] +
                             [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail])
                         telegram_send(token, chat, body, html=True)
-                elif text.startswith("/help"):
-                    telegram_send(token, chat,
-                                  "/stats  本週進度\n/last   最近幾件\n/help   這份說明")
         except Exception as e:
             log(f"telegram poll error: {e}")
             time.sleep(10)
