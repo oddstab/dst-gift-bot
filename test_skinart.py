@@ -28,7 +28,9 @@ def find_game():
 
 
 GAME = find_game()
-SAMPLES = ("BODY_BUTTONS_BLUE_SKY", "DECOR_LAMP_FANTASY", "LEGS_WORTOX_SURVIVOR")
+# 三個不同部位，外加一個檔案長度剛好是 8 的倍數的樣本（尾端區塊不可被轉換）
+SAMPLES = ("BODY_BUTTONS_BLUE_SKY", "DECOR_LAMP_FANTASY", "LEGS_WORTOX_SURVIVOR",
+           "HAND_WARLY_CANDYMAN")
 
 
 def decode_png(data):
@@ -63,13 +65,35 @@ def decode_png(data):
 @unittest.skipUnless(GAME, "找不到 DST 安裝，跳過造型圖測試")
 class SkinArtTest(unittest.TestCase):
     def test_dyn_decrypts_to_zip(self):
-        path = os.path.join(GAME, "data", "anim", "dynamic", "body_buttons_blue_sky.dyn")
+        for prefab in ("body_buttons_blue_sky", "hand_warly_candyman"):
+            with self.subTest(prefab=prefab):
+                path = os.path.join(GAME, "data", "anim", "dynamic", prefab + ".dyn")
+                with open(path, "rb") as f:
+                    raw = f.read()
+                plain = skinart.decrypt_dyn(raw)
+                self.assertEqual(plain[:4], b"PK\x03\x04")
+                tex = skinart.read_atlas(plain)
+                self.assertEqual(tex[:4], b"KTEX")
+
+    def test_tail_is_never_transformed(self):
+        # 遊戲迴圈是 do/while(edi < size)：最後一個完整區塊（或不足 8 bytes 的尾巴）不動。
+        # size%8==0 時整塊 8 bytes 不動；否則只有最後 size%8 bytes 不動。
+        for prefab in ("hand_warly_candyman", "body_buttons_blue_sky"):
+            with self.subTest(prefab=prefab):
+                path = os.path.join(GAME, "data", "anim", "dynamic", prefab + ".dyn")
+                with open(path, "rb") as f:
+                    raw = f.read()
+                plain = skinart.decrypt_dyn(raw)
+                tail = len(raw) % 8 or 8
+                self.assertEqual(plain[-tail:], raw[-tail:])
+
+    def test_plaintext_zip_dyn_is_passed_through(self):
+        path = os.path.join(GAME, "data", "anim", "dynamic", "box_bolt.dyn")
         with open(path, "rb") as f:
             raw = f.read()
-        plain = skinart.decrypt_dyn(raw)
-        self.assertEqual(plain[:4], b"PK\x03\x04")
-        tex = skinart.read_atlas(plain)
-        self.assertEqual(tex[:4], b"KTEX")
+        self.assertEqual(raw[:2], b"PK", "這個樣本預期本來就是明文 ZIP")
+        self.assertEqual(skinart.decrypt_dyn(raw), raw)
+        self.assertEqual(skinart.read_atlas(raw)[:4], b"KTEX")
 
     def test_ktex_size_matches_header(self):
         path = os.path.join(GAME, "data", "anim", "dynamic", "body_buttons_blue_sky.dyn")

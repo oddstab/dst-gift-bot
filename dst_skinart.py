@@ -32,9 +32,16 @@ ALPHA_THRESHOLD = 24
 
 
 def decrypt_dyn(raw):
-    """把 .dyn 的混淆還原成 ZIP bytes。尾巴不足 8 bytes 的部分原樣保留。"""
+    """把 .dyn 的混淆還原成 ZIP bytes。
+
+    遊戲的迴圈是 `edi = 8; do { 處理一個區塊; edi += 8 } while (edi < size)`，
+    所以**最後一個 8 bytes 區塊永遠不動**，不管檔案長度是不是 8 的倍數。
+    用 (len-1)//8 才符合：長度 8n 時只處理 n-1 塊，8n+r 時處理 n 塊。
+    """
+    if raw[:2] == b"PK":            # 有些 .dyn 本來就是明文 ZIP，引擎也會跳過轉換
+        return bytes(raw)
     out = bytearray(raw)
-    for base in range(0, len(raw) // 8 * 8, 8):
+    for base in range(0, (len(raw) - 1) // 8 * 8, 8):
         block = raw[base:base + 8]
         for i in range(8):
             out[base + i] = block[DYN_SRC[i]] ^ DYN_KEY[i]
