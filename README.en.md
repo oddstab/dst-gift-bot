@@ -143,7 +143,7 @@ With Telegram configured you can also talk to the bot:
 | Command | What it does |
 |---|---|
 | `/stats` | weekly progress bar, reset countdown, inventory and accrued time |
-| `/last` | the last five gifts |
+| `/last` | this week's skins, as a card you can page through |
 | `/help` | the command list |
 
 ```

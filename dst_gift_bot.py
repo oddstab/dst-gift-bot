@@ -563,14 +563,14 @@ def render_progress(state):
 
 TG_COMMANDS = [
     {"command": "stats", "description": "本週掉落進度與重置倒數"},
-    {"command": "last", "description": "最近 5 件（附造型圖）"},
+    {"command": "last", "description": "本週造型一覽（可翻頁）"},
     {"command": "help", "description": "指令說明"},
 ]
 
 HELP_TEXT = (
     "<b>DST 禮物機器人</b>\n\n"
     "/stats  本週進度、重置倒數、庫存與累積時數\n"
-    "/last   最近 5 件（附造型圖）\n"
+    "/last   本週造型一覽（可翻頁）\n"
     "/help   這份說明\n\n"
     "背景每 6 分鐘送一次心跳，收到禮物會主動通知。"
 )
@@ -603,6 +603,66 @@ def telegram_send(token, chat, text, html=False, markup=None):
     _post_json(f"{TG_API}/bot{token}/sendMessage", payload)
 
 
+def telegram_answer(token, callback_id, text=None):
+    payload = {"callback_query_id": callback_id}
+    if text:
+        payload["text"] = text
+    try:
+        _post_json(f"{TG_API}/bot{token}/answerCallbackQuery", payload, timeout=5)
+    except Exception as e:
+        log(f"answerCallbackQuery failed: {e}")
+
+
+def telegram_action(token, chat, action="upload_photo"):
+    try:
+        _post_json(f"{TG_API}/bot{token}/sendChatAction",
+                   {"chat_id": chat, "action": action}, timeout=5)
+    except Exception:
+        pass
+
+
+def card_items(state):
+    """可翻頁的造型卡：本週有 prefab 的掉落，新的在前。"""
+    _, _, weekly = week_counts(state)
+    return [g for g in reversed(weekly or state["gifts"]) if g.get("item")]
+
+
+def pager_markup(index, total):
+    row = []
+    if index > 0:
+        row.append({"text": "⬅️ 上一張", "callback_data": f"last:{index - 1}"})
+    row.append({"text": f"{index + 1} / {total}", "callback_data": "noop"})
+    if index < total - 1:
+        row.append({"text": "下一張 ➡️", "callback_data": f"last:{index + 1}"})
+    return {"inline_keyboard": [row]}
+
+
+def send_card(token, chat, state, index, message_id=None):
+    """送出一張造型卡；有 message_id 就原地換圖（Telegram 會標成 edited）。"""
+    items = card_items(state)
+    if not items:
+        return None
+    index = max(0, min(index, len(items) - 1))
+    gift = items[index]
+    path = resolve_icon(gift.get("item"))
+    if not path:
+        if message_id:
+            telegram_answer(token, None, "這件沒有圖")
+        return None
+    caption = f"<b>{esc(gift_label(gift))}</b>"
+    markup = json.dumps(pager_markup(index, len(items)), ensure_ascii=False)
+    if message_id:
+        media = json.dumps({"type": "photo", "media": "attach://photo",
+                            "caption": caption, "parse_mode": "HTML"}, ensure_ascii=False)
+        return _post_multipart(f"{TG_API}/bot{token}/editMessageMedia", "photo", path,
+                               {"chat_id": chat, "message_id": message_id,
+                                "media": media, "reply_markup": markup})
+    telegram_action(token, chat)
+    return _post_multipart(f"{TG_API}/bot{token}/sendPhoto", "photo", path,
+                           {"chat_id": chat, "caption": caption,
+                            "parse_mode": "HTML", "reply_markup": markup})
+
+
 def telegram_loop(state):
     """長輪詢 Telegram，讓 /stats 隨時可查。只有設定了 token 與 chat_id 才會啟動。"""
     tg = CONFIG.get("telegram") or {}
@@ -620,6 +680,24 @@ def telegram_loop(state):
                 data = json.loads(r.read().decode("utf-8", "replace"))
             for upd in data.get("result", []):
                 offset = max(offset, int(upd.get("update_id", 0)) + 1)
+
+                cq = upd.get("callback_query")      # 造型卡的翻頁按鈕
+                if cq:
+                    cchat = str(((cq.get("message") or {}).get("chat") or {}).get("id") or "")
+                    if chat and cchat == chat:
+                        payload = cq.get("data") or ""
+                        if payload == "noop":
+                            telegram_answer(token, cq.get("id"))
+                        elif payload.startswith("last:"):
+                            try:
+                                num = int(payload.split(":", 1)[1])
+                            except ValueError:
+                                num = 0
+                            telegram_answer(token, cq.get("id"))
+                            send_card(token, chat, state, num,
+                                      message_id=(cq.get("message") or {}).get("message_id"))
+                    continue
+
                 msg = upd.get("message") or {}
                 this_chat = str((msg.get("chat") or {}).get("id") or "")
                 if not this_chat:
@@ -641,14 +719,15 @@ def telegram_loop(state):
                                   markup=MAIN_KEYBOARD)
                 elif text.startswith("/last") or "最近" in text:
                     _, _, weekly = week_counts(state)
-                    tail = list(reversed((weekly or state["gifts"])[-8:]))
+                    tail = list(reversed(weekly or state["gifts"]))
                     if not tail:
                         telegram_send(token, chat, "還沒有紀錄", markup=MAIN_KEYBOARD)
                         continue
                     body = "\n".join(
-                        [f"<b>本週 {len(tail)} 件</b>", ""] +
+                        [f"<b>本週 {len(tail)} 件</b>"] +
                         [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail])
                     telegram_send(token, chat, body, html=True, markup=MAIN_KEYBOARD)
+                    send_card(token, chat, state, 0)
         except Exception as e:
             log(f"telegram poll error: {e}")
             time.sleep(10)

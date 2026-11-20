@@ -136,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 | 指令 | 作用 |
 |---|---|
 | `/stats` | 本週進度條、重置倒數、庫存與累積時數 |
-| `/last` | 最近 5 件 |
+| `/last` | 本週造型一覽（可翻頁的造型卡） |
 | `/help` | 指令說明 |
 
 ```
