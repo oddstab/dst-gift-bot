@@ -147,12 +147,21 @@ With Telegram configured you can also talk to the bot:
 | `/help` | the command list |
 
 ```
-DST · 每週 8 件計時掉落
-[███████░]  7/8
-重置：Fri 2026-11-20 05:40（還有 8h 57m）
-每日禮物：2 件
-庫存 2547 件 · 心跳 452 次（1d 21h）
+🎁 DST 掉落進度
+████████ 8/8 計時掉落
+
+每日禮物 1 件 · 庫存 2556 件
+累積 3d 04h
+⏳ 重置 Fri 2026-11-27 05:40（還有 6d 01h）
+
+最近
+👕 紐扣襯衫 · 2026-11-20 14:19
+🪑 精靈頭燈 · 2026-11-20 13:06
 ```
+
+Skin names come from the game's own string table (`scripts/skin_strings.lua`, 4145 entries)
+with Chinese translations from `scripts/languages/chinese_t.po`. You see the official name
+(`紐扣襯衫`) rather than a prefab code (`BODY_BUTTONS_BLUE_SKY`), entirely offline.
 
 > Only one process can poll a bot token at a time (Telegram `getUpdates` limitation), so do
 > not point another program at the same token.
@@ -164,10 +173,10 @@ python dst_gift_bot.py --stats
 ```
 
 ```
-week      2026-11-13 05:40 -> 2026-11-20 05:40  (local)
-drops     7/8 timed + 2 daily
-reset in  21h 05m  (Fri 2026-11-20 05:40 local)
-total     9 gifts, 331 heartbeats (1d 09h), 2547 items
+week      2026-11-20 05:40 -> 2026-11-27 05:40  (local)
+drops     8/8 timed + 1 daily
+reset in  6d 01h  (Fri 2026-11-27 05:40 local)
+total     18 gifts, 759 heartbeats (3d 04h), 2556 items
 ```
 
 ## FAQ

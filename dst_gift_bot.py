@@ -38,6 +38,50 @@ CONFIG_PATH = os.path.join(BASE, "config.json")
 TG_API = os.environ.get("DST_TELEGRAM_API_BASE", "https://api.telegram.org")
 WEEK_ANCHOR = 1767303600        # 已知的週四 21:40 UTC，用來推算每週重置邊界
 CONFIG = {}
+SKIN_NAMES = {}                 # prefab -> 英文名（遊戲自己的 skin_strings.lua）
+SKIN_ZH = {}                    # 英文名 -> 繁中名（chinese_t.po）
+
+SLOT_EMOJI = {"BODY": "👕", "LEGS": "👖", "FEET": "👟", "HAND": "🧤", "HEAD": "🎩",
+              "DECOR": "🪑", "PROFILEFLAIR": "✨", "PROFILEICON": "🖼", "EMOTE": "💃",
+              "PORTRAIT": "🖼", "MODE": "🎭", "GRAVESTONE": "🪦"}
+
+
+def load_skin_names():
+    """從遊戲自己的字串表取造型名稱，離線、確定、不用猜圖片網址。"""
+    global SKIN_NAMES, SKIN_ZH
+    try:
+        import zipfile
+        path = os.path.join(GAME_DIR, "data", "databundles", "scripts.zip")
+        with zipfile.ZipFile(path) as z:
+            lua = z.read("scripts/skin_strings.lua").decode("utf-8", "replace")
+            block = re.search(r"STRINGS\.SKIN_NAMES\s*=\s*\{(.*?)\n\}", lua, re.S)
+            SKIN_NAMES = dict(re.findall(r'(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"', block.group(1)))
+            for po_name in ("chinese_t.po", "chinese_s.po"):
+                try:
+                    po = z.read(f"scripts/languages/{po_name}").decode("utf-8", "replace")
+                except KeyError:
+                    continue
+                SKIN_ZH = dict(re.findall(
+                    r'msgid "((?:[^"\\]|\\.)*)"\s*\nmsgstr "((?:[^"\\]|\\.)*)"', po))
+                break
+        log(f"skin names loaded: {len(SKIN_NAMES)} prefabs, {len(SKIN_ZH)} translations")
+    except Exception as e:
+        log(f"could not read skin names from the game: {e}")
+
+
+def skin_label(item_type):
+    """回傳帶圖示的可讀名稱，例如 '👕 紐扣襯衫'。"""
+    if not item_type:
+        return "🎁 未知造型"
+    key = item_type.lower()
+    en = SKIN_NAMES.get(key) or item_type.replace("_", " ").title()
+    name = SKIN_ZH.get(en, en)
+    emoji = SLOT_EMOJI.get(item_type.split("_")[0], "🎁")
+    return f"{emoji} {name}"
+
+
+def esc(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 ITEMS_URL = "https://items.kleientertainment.com/clientitems/DST/"
 LOGIN_URL = "https://login.kleientertainment.com/login/LoginViaSteam"
@@ -70,19 +114,21 @@ def save_config():
         json.dump(CONFIG, f, ensure_ascii=False, indent=2)
 
 
-def notify(title, text=""):
-    """可選的推播。沒設定就什麼都不做；失敗只記一行，不影響掛機。"""
-    msg = f"{title}\n{text}".strip()
+def notify(plain, html=None):
+    """可選的推播。Discord 吃純文字、Telegram 吃 HTML；失敗只記一行，不影響掛機。"""
     try:
         url = CONFIG.get("discord_webhook") or os.environ.get("DST_DISCORD_WEBHOOK")
         if url:
-            _post_json(url, {"content": msg})
+            _post_json(url, {"content": plain})
         tg = CONFIG.get("telegram") or {}
         tok = tg.get("token") or os.environ.get("DST_TELEGRAM_TOKEN")
         chat = tg.get("chat_id") or os.environ.get("DST_TELEGRAM_CHAT_ID")
         if tok and chat:
-            _post_json(f"https://api.telegram.org/bot{tok}/sendMessage",
-                       {"chat_id": chat, "text": msg, "disable_web_page_preview": True})
+            payload = {"chat_id": chat, "text": html or plain,
+                       "disable_web_page_preview": True}
+            if html:
+                payload["parse_mode"] = "HTML"
+            _post_json(f"{TG_API}/bot{tok}/sendMessage", payload)
     except Exception as e:
         log(f"notify failed: {e}")
 
@@ -293,9 +339,12 @@ def record_gifts(state, result, source):
     gift = {"time": int(time.time()), "source": source, "key": result.get("Key"),
             "item": result.get("ItemType")}
     state["gifts"].append(gift)
-    label = gift.get("item") or gift.get("key") or "no item info"
-    log(f"GIFT RECEIVED via {source}: {label}  (week {week_count(state)}/8)")
-    notify("DST gift received", f"{label} ({source})")
+    label = gift_label(gift)
+    log(f"GIFT RECEIVED via {source}: {gift.get('item') or 'no item info'}"
+        f"  ({label}, week {week_count(state)}/8)")
+    notify(f"GIFT {label}",
+           f"<b>{esc(label)}</b>\n本週 {week_count(state)}/8 · "
+           f"累積 {human_duration(state['ticks'] * TICK_INTERVAL)}")
     return True
 
 
@@ -354,29 +403,34 @@ def progress_bar(value, total=8):
     return "█" * filled + "░" * (total - filled)
 
 
+def gift_label(gift):
+    return skin_label(gift.get("item")) if gift.get("item") else "🎁 每日禮物"
+
+
 def render_progress(state):
-    start, end = week_bounds()
+    _, end = week_bounds()
     now = int(time.time())
     timed, daily, weekly = week_counts(state)
     lines = [
-        "DST · 每週 8 件計時掉落",
-        f"[{progress_bar(timed)}]  {timed}/8",
-        f"重置：{local_time(end, True)}（還有 {human_duration(end - now)}）",
-        f"每日禮物：{daily} 件",
-        f"庫存 {state['item_count']} 件 · 心跳 {state['ticks']} 次"
-        f"（{human_duration(state['ticks'] * TICK_INTERVAL)}）",
+        "🎁 <b>DST 掉落進度</b>",
+        f"<code>{progress_bar(timed)}</code> <b>{timed}</b>/8 計時掉落",
+        "",
+        f"每日禮物 <b>{daily}</b> 件 · 庫存 <b>{state['item_count']}</b> 件",
+        f"累積 <b>{human_duration(state['ticks'] * TICK_INTERVAL)}</b>",
+        f"⏳ 重置 <b>{local_time(end, True)}</b>（還有 {human_duration(end - now)}）",
     ]
-    recent = weekly[-3:]
-    if recent:
-        lines.append("最近：")
-        for g in reversed(recent):
-            lines.append(f"  {local_time(g['time'])}  {g.get('item') or '每日禮物'}")
+    if weekly:
+        lines += ["", "<b>最近</b>"]
+        for g in reversed(weekly[-3:]):
+            lines.append(f"{esc(gift_label(g))} · {local_time(g['time'])}")
     return "\n".join(lines)
 
 
-def telegram_send(token, chat, text):
-    _post_json(f"{TG_API}/bot{token}/sendMessage",
-               {"chat_id": chat, "text": text, "disable_web_page_preview": True})
+def telegram_send(token, chat, text, html=False):
+    payload = {"chat_id": chat, "text": text, "disable_web_page_preview": True}
+    if html:
+        payload["parse_mode"] = "HTML"
+    _post_json(f"{TG_API}/bot{token}/sendMessage", payload)
 
 
 def telegram_loop(state):
@@ -410,13 +464,15 @@ def telegram_loop(state):
                     continue                    # 只理會綁定的那個對話
                 text = (msg.get("text") or "").strip().lower()
                 if text.startswith(("/stats", "/status")):
-                    telegram_send(token, chat, render_progress(state))
+                    telegram_send(token, chat, render_progress(state), html=True)
                 elif text.startswith("/last"):
-                    timed, daily, weekly = week_counts(state)
-                    tail = weekly[-5:] or state["gifts"][-5:]
-                    body = "\n".join(f"{local_time(g['time'])}  {g.get('item') or '每日禮物'}"
-                                     for g in reversed(tail)) or "還沒有紀錄"
-                    telegram_send(token, chat, body)
+                    _, _, weekly = week_counts(state)
+                    tail = list(reversed(weekly[-5:] or state["gifts"][-5:]))
+                    body = "\n".join(
+                        [f"<b>最近 {len(tail)} 件</b>", ""] +
+                        [f"{esc(gift_label(g))} · {local_time(g['time'])}" for g in tail]
+                    ) if tail else "還沒有紀錄"
+                    telegram_send(token, chat, body, html=True)
                 elif text.startswith("/help"):
                     telegram_send(token, chat,
                                   "/stats  本週進度\n/last   最近幾件\n/help   這份說明")
@@ -514,7 +570,7 @@ def daemon(kl, state, auto_open=True):
             delay = min(60 * 2 ** (failures - 1), 900)
             log(f"error: {e} (failures={failures}, retry in {delay}s)")
             if failures == 3:
-                notify("DST bot keeps failing", str(e))
+                notify(f"⚠️ DST bot keeps failing\n{e}")
         finally:
             kl.steam.keepalive()
 
@@ -613,6 +669,7 @@ def main():
     if not GAME_DIR:
         sys.exit("Could not find Don't Starve Together. Pass --game \"<path to the game folder>\".")
     log(f"game folder: {GAME_DIR}")
+    load_skin_names()
 
     steam = open_steam(args.lib)
     kl = Klei(steam)

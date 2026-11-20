@@ -140,12 +140,21 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 | `/help` | 指令說明 |
 
 ```
-DST · 每週 8 件計時掉落
-[███████░]  7/8
-重置：Fri 2026-11-20 05:40（還有 8h 57m）
-每日禮物：2 件
-庫存 2547 件 · 心跳 452 次（1d 21h）
+🎁 DST 掉落進度
+████████ 8/8 計時掉落
+
+每日禮物 1 件 · 庫存 2556 件
+累積 3d 04h
+⏳ 重置 Fri 2026-11-27 05:40（還有 6d 01h）
+
+最近
+👕 紐扣襯衫 · 2026-11-20 14:19
+🪑 精靈頭燈 · 2026-11-20 13:06
 ```
+
+造型名稱取自遊戲自己的字串表（`scripts/skin_strings.lua` 的 4145 筆），
+繁中翻譯來自 `scripts/languages/chinese_t.po`。所以顯示的是官方名稱（例：`紐扣襯衫`），
+不是 `BODY_BUTTONS_BLUE_SKY` 這種代碼，而且完全離線、不需要連任何第三方網站。
 
 > 一個 bot token 同時只能有一個程式在收指令（Telegram `getUpdates` 的限制），
 > 所以不要讓別的程式輪詢同一個 token。
@@ -157,10 +166,10 @@ python dst_gift_bot.py --stats
 ```
 
 ```
-week      2026-11-13 05:40 -> 2026-11-20 05:40  (local)
-drops     7/8 timed + 2 daily
-reset in  21h 05m  (Fri 2026-11-20 05:40 local)
-total     9 gifts, 331 heartbeats (1d 09h), 2547 items
+week      2026-11-20 05:40 -> 2026-11-27 05:40  (local)
+drops     8/8 timed + 1 daily
+reset in  6d 01h  (Fri 2026-11-27 05:40 local)
+total     18 gifts, 759 heartbeats (3d 04h), 2556 items
 ```
 
 ## 常見問題
