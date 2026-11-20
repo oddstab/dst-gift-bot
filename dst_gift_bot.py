@@ -539,7 +539,11 @@ def progress_bar(value, total=8):
 
 
 def gift_label(gift):
-    return skin_label(gift.get("item")) if gift.get("item") else "🎁 每日禮物"
+    """每日禮物也會帶造型名，所以要用來源標記才分得出來。"""
+    if not gift.get("item"):
+        return "🎁 每日禮物"
+    label = skin_label(gift["item"])
+    return f"{label}（每日禮物）" if gift.get("source") == "daily" else label
 
 
 def render_progress(state):
