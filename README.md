@@ -152,9 +152,9 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 🪑 精靈頭燈 · 2026-11-20 13:06
 ```
 
-造型圖目前**不會**顯示，一律用純文字。遊戲本體沒有把造型貼圖存成獨立檔案：
-`anim_dynamic.zip` 裡每個造型只有 `build.bin`（幾何），貼圖名指向 `atlas-0.texs`，
-由引擎在執行時組合。考證過程與數據見 `REPORT.md` 的「本地造型圖考證」。
+收到禮物時會**附上造型圖**，而且是從你本機安裝的遊戲現地合成的：
+`data/anim/dynamic/<prefab>.dyn` 解開後是一張 `KTEX`（BC3）圖集，裁出最大的一塊就是造型。
+全程不連任何外部網站。格式細節見 `REPORT.md` 的 §A.7。
 
 造型名稱取自遊戲自己的字串表（`scripts/skin_strings.lua` 的 4145 筆），
 繁中翻譯來自 `scripts/languages/chinese_t.po`。顯示的是官方名稱加顏色後綴

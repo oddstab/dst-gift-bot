@@ -18,6 +18,7 @@ import argparse
 import binascii
 import ctypes
 import datetime
+import io
 import json
 import os
 import re
@@ -26,6 +27,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+import dst_skinart
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 TICK_INTERVAL = 360                    # matches the float constant at 0x1404f3390 in the client
@@ -41,7 +44,8 @@ CONFIG = {}
 SKIN_NAMES = {}                 # prefab -> 英文名（遊戲自己的 skin_strings.lua）
 SKIN_ZH = {}                    # 英文名 -> 繁中名（chinese_t.po）
 ICON_CACHE_PATH = os.path.join(BASE, "icons.json")
-ICON_CACHE = {}                 # PREFAB -> 造型圖 URL
+ICON_DIR = os.path.join(BASE, "icons")
+ICON_CACHE = {}                 # PREFAB -> 本機產生的 PNG 路徑
 
 SLOT_EMOJI = {"BODY": "👕", "LEGS": "👖", "FEET": "👟", "HAND": "🧤", "HEAD": "🎩",
               "DECOR": "🪑", "PROFILEFLAIR": "✨", "PROFILEICON": "🖼", "EMOTE": "💃",
@@ -152,15 +156,30 @@ def save_icons():
 
 
 def resolve_icon(prefab):
-    """造型圖只能來自本地，目前一律回 None。
+    """用本機遊戲的 .dyn 現地合成造型圖，回傳 PNG 檔路徑；沒有就回 None。
 
-    查證結果（詳見 REPORT.md）：anim_dynamic.zip 裡每個造型只有 build.bin，
-    貼圖名寫的是 atlas-0.texs，由引擎在執行時組合，遊戲沒有把造型貼圖單獨存成檔案。
-    在解開 .dyn 容器之前，訊息退回純文字，不連任何外部網站。
+    格式細節見 dst_skinart.py 與 REPORT.md；全程不連任何外部網站。
     """
     if not prefab:
         return None
-    return ICON_CACHE.get(prefab.upper()) or None
+    key = prefab.upper()
+    cached = ICON_CACHE.get(key)
+    if cached and os.path.isfile(cached):
+        return cached
+    try:
+        data = dst_skinart.render_prefab(GAME_DIR, prefab)
+    except Exception as e:
+        log(f"skinart failed for {prefab}: {e}")
+        return None
+    if not data:
+        return None
+    os.makedirs(ICON_DIR, exist_ok=True)
+    path = os.path.join(ICON_DIR, prefab.lower() + ".png")
+    with open(path, "wb") as f:
+        f.write(data)
+    ICON_CACHE[key] = path
+    save_icons()
+    return path
 
 ITEMS_URL = "https://items.kleientertainment.com/clientitems/DST/"
 LOGIN_URL = "https://login.kleientertainment.com/login/LoginViaSteam"
@@ -206,7 +225,11 @@ def notify(plain, html=None, photo=None):
             return
         if photo and html:
             try:
-                _post_json(f"{TG_API}/bot{tok}/sendPhoto",
+                if os.path.isfile(photo):       # 本機合成的圖，走 multipart 上傳
+                    return _post_multipart(f"{TG_API}/bot{tok}/sendPhoto", "photo", photo,
+                                           {"chat_id": chat, "caption": html,
+                                            "parse_mode": "HTML"})
+                _post_json(f"{TG_API}/bot{tok}/sendPhoto",   # 遠端 URL（備用圖源）
                            {"chat_id": chat, "photo": photo, "caption": html,
                             "parse_mode": "HTML"})
                 return
@@ -224,6 +247,29 @@ def _post_json(url, payload):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
     req.add_header("Content-Type", "application/json")
     urllib.request.urlopen(req, timeout=10).read()
+
+
+def _post_multipart(url, field, file_path, extra=None, timeout=30):
+    """把本機檔案用 multipart/form-data 上傳（標準函式庫，沒有額外依賴）。"""
+    boundary = "----dstgift" + binascii.hexlify(os.urandom(8)).decode()
+    body = io.BytesIO()
+    for key, value in (extra or {}).items():
+        body.write(f"--{boundary}\r\n".encode())
+        body.write(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode())
+        body.write(str(value).encode())
+        body.write(b"\r\n")
+    body.write(f"--{boundary}\r\n".encode())
+    body.write((f'Content-Disposition: form-data; name="{field}"; '
+                f'filename="{os.path.basename(file_path)}"\r\n').encode())
+    body.write(b"Content-Type: image/png\r\n\r\n")
+    with open(file_path, "rb") as f:
+        body.write(f.read())
+    body.write(f"\r\n--{boundary}--\r\n".encode())
+    data = body.getvalue()
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
 
 
 IS_WIN = sys.platform.startswith("win")

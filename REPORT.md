@@ -152,32 +152,59 @@ Mod `Drops Reset Countdown` 的算法也一致：
 
 ---
 
-## A.7 本地造型圖考證（結論：沒有獨立圖檔）
+## A.7 `.dyn` 格式與本地造型圖（已解開）
 
-想把「拿到什麼」變成圖片，必須先確定遊戲把造型圖存在哪。逐一查證：
+`data/anim/dynamic/<prefab>.dyn`（3532 個，2KB–2.5MB）就是該造型的貼圖包。
+它不是壓縮檔，而是把一個標準 ZIP 用 **8 bytes 區塊重排 + XOR** 混淆。
 
-| 位置 | 內容 | 是否含造型圖 |
-|---|---|---|
-| `data/databundles/images.zip` → `images/inventoryimages*.xml` | 3394 個道具圖示 | **沒有**任何造型 prefab |
-| `data/images/skinsscreen.xml` | 6 個 UI 按鈕 | 只有介面元件 |
-| `data/bigportraits/` | 377 個角色立繪，命名為 `角色_套裝`（`walter_shadow`） | 只有整隻角色，無單品項 |
-| `data/anim/*.zip`（3598 個） | 每個含 `anim.bin` + `atlas-0.tex` + `build.bin` | 掃描全部 `build.bin`，**沒有任何一個**提到造型 prefab |
-| `data/databundles/anim_dynamic.zip`（3438 個內層 zip） | **每個只有 `build.bin`**，沒有 `.tex` | 幾何有，貼圖沒有 |
-| `data/anim/dynamic/*.dyn`（3626 個，30–50KB） | 混淆過的容器 | zlib / raw deflate / gzip / lzma 全部失敗，0–255 位移皆無法解壓 |
+### 混淆還原
 
-`build.bin` 開頭是 `BILD`，內容包含造型名與 `atlas-0.texs` 這個貼圖集引用；
-真正畫圖的是 `scripts/widgets/itemimage.lua`：
+證據是 `dontstarve_steam_x64.exe` 裡 `AnimationFile::LoadDynamicTextures`
+（`0x140384018` 引用 `.dyn` 字串，`0x140384100` 起是還原迴圈）。迴圈先把開頭兩
+bytes 跟 `PK` 比對，不像 ZIP 才做轉換；轉換本身是：
 
-```lua
-self.frame:GetAnimState():OverrideSkinSymbol("SWAP_ICON", buildname, "SWAP_ICON")
+```asm
+movzx ecx, byte ptr [rbx]      ; b1
+movzx eax, byte ptr [rbx + 4]  ; b5
+movzx edx, byte ptr [rbx - 1]  ; b0
+movzx r8d, byte ptr [rbx + 1]  ; b2
+xor   byte ptr [rbx + 3], 0x91
+...
+add   rbx, 8
 ```
 
-所以遊戲內的「靜態圖」其實是 KAnim build 裡的 `SWAP_ICON` 這個 sprite，
-貼圖由引擎在執行時把 `atlas-0.texs` 組出來。**遊戲沒有把造型貼圖存成可直接讀取的檔案**，
-要做出圖片就得實作 KAnim 解碼（build.bin 的 frame 幾何 + 貼圖集組合），
-或先解開 `.dyn` 的混淆格式。
+整理成公式：
 
-在解開之前，程式一律顯示文字名稱，不連任何外部網站。
+```
+out[i] = block[src[i]] ^ key[i]
+src = [5, 3, 6, 7, 4, 2, 0, 1]
+key = [0x8d, 0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94]
+```
+
+驗算第一個區塊：`93 94 92 c5 85 dd 8c 94` →
+`50 4b 03 04 14 00 00 00`，也就是 `PK\x03\x04` 的 ZIP 標頭。
+尾巴不足 8 bytes 的部分不動。解出來是含 `atlas-0.tex` 的 ZIP。
+
+### KTEX
+
+`atlas-0.tex` 是 Klei 自家的 `KTEX` 格式：`KTEX` magic + **140 bytes 檔頭**
++ BC3(DXT5) 區塊（含 8 級 mip chain）。寬高是 little-endian `u16`，分別在 offset 8 與 10。
+
+驗證方式：`512×512` 的圖集，8 級 mip 的 BC3 總量是
+`262144+65536+16384+4096+1024+256+64+16 = 349520`，檔案 349660 − 140 = 349520，
+剛好吻合；同樣的 140 bytes 偏移在 `512×256` 的 `abigail_flower` 圖集上也能正確解出。
+
+解碼後的圖集是一張放滿零件的大圖（一件襯衫會有袖子、袖口、領子…），
+所以再取 **alpha 連通區塊中最大的一塊** 的 bbox 當代表圖。實測三個部位：
+
+| prefab | 尺寸 | 非透明比例 |
+|---|---|---|
+| `BODY_BUTTONS_BLUE_SKY` | 175×197 | 0.63 |
+| `DECOR_LAMP_FANTASY` | 240×233 | 0.55 |
+| `LEGS_WORTOX_SURVIVOR` | 201×175 | 0.50 |
+
+實作在 `dst_skinart.py`（只用標準函式庫，PNG 用 `zlib` 自行輸出），
+測試在 `test_skinart.py`。整個流程不連任何外部網站。
 
 ## B. 技術流程圖與必要條件
 

@@ -159,10 +159,10 @@ With Telegram configured you can also talk to the bot:
 🪑 精靈頭燈 · 2026-11-20 13:06
 ```
 
-Gifts arrive as **text only**. The game does not ship skin textures as standalone files:
-each skin in `anim_dynamic.zip` contains just a `build.bin` (geometry) pointing at
-`atlas-0.texs`, which the engine assembles at runtime. The investigation is written up in
-`REPORT.md` under "Local skin art".
+Each gift arrives **with a picture of the item**, rendered locally from your own install:
+`data/anim/dynamic/<prefab>.dyn` decrypts to a `KTEX` (BC3) atlas, and the largest opaque
+region is cropped out as the icon. No external service is contacted. Format details are in
+`REPORT.md` §A.7.
 
 Skin names come from the game's own string table (`scripts/skin_strings.lua`, 4145 entries)
 with Chinese translations from `scripts/languages/chinese_t.po`. You see the official name

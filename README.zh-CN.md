@@ -152,9 +152,9 @@ powershell -ExecutionPolicy Bypass -File .\install-task.ps1 -Uninstall
 🪑 精靈頭燈 · 2026-11-20 13:06
 ```
 
-皮肤图目前**不会**显示，一律用纯文字。游戏本體没有把皮肤贴图存成独立文件：
-`anim_dynamic.zip` 里每个皮肤只有 `build.bin`（几何），贴图名指向 `atlas-0.texs`，
-由引擎在运行时组合。考证过程与数据见 `REPORT.md` 的「本地造型图考证」。
+收到礼物时会**附上皮肤图**，而且是从你本机安装的游戏现场合成的：
+`data/anim/dynamic/<prefab>.dyn` 解开后是一张 `KTEX`（BC3）图集，裁出最大的一块就是造型。
+全程不连接任何外部网站。格式细节见 `REPORT.md` 的 §A.7。
 
 皮肤名称取自游戏自己的字符串表（`scripts/skin_strings.lua` 的 4145 笔），
 繁中翻译来自 `scripts/languages/chinese_t.po`。显示的是官方名称加颜色后缀
