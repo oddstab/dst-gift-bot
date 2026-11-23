@@ -218,7 +218,12 @@ def render_prefab(game_dir, prefab):
 
     # 有些圖集把預覽圖鋪在半透明深色底上；先把背景清成透明再裁，
     # 否則 Telegram 上會看到一整塊灰底。
-    mask = subject_mask(rgba, w, h, dominant_color(rgba))
+    bg = dominant_color(rgba)
+    if bg[3] > 8:
+        # 這種圖集是「已合成的預覽表」：整張鋪在半透明底色上，RGB 本身點描成雜訊，
+        # 硬裁出來只會是一團看不懂的彩色斑點。寧可退回純文字。
+        return None
+    mask = subject_mask(rgba, w, h, bg)
     cleaned = bytearray(rgba)
     for i in range(w * h):
         if not mask[i]:

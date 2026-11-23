@@ -120,6 +120,10 @@ class SkinArtTest(unittest.TestCase):
                           for i in range(0, len(rgba), 4) if rgba[i + 3] > 24}
                 self.assertGreater(len(colors), 8, f"{prefab} 顏色種類過少")
 
+    def test_baked_preview_atlas_falls_back_to_text(self):
+        # 這件是「半透明底 + 點描」的預覽表，硬裁只會得到彩色雜訊，應該回 None
+        self.assertIsNone(skinart.render_prefab(GAME, "HAND_WAXWELL_GLADIATOR"))
+
     def test_unknown_prefab_returns_none(self):
         self.assertIsNone(skinart.render_prefab(GAME, "NOT_A_REAL_SKIN_PREFAB"))
 
