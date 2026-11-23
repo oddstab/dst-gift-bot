@@ -107,14 +107,42 @@ def ktex_to_rgba(tex):
     return w, h, bytes(flipped)
 
 
-def largest_region(rgba, w, h, threshold=ALPHA_THRESHOLD):
-    """回傳 alpha 最大連通區塊的 bbox (x0, y0, x1, y1)，找不到回 None。"""
+def dominant_color(rgba, step=16):
+    """取樣找出最常見的顏色，當成背景色。"""
+    counts = {}
+    for i in range(0, len(rgba) - 3, 4 * step):
+        key = rgba[i:i + 4]
+        counts[key] = counts.get(key, 0) + 1
+    return max(counts, key=counts.get) if counts else b"\x00\x00\x00\x00"
+
+
+def subject_mask(rgba, w, h, bg, threshold=ALPHA_THRESHOLD, tol=40):
+    """不是背景、也不是透明的像素。
+
+    有些造型的圖集是把預覽圖鋪在半透明深色底上（例：HAND_WAXWELL_GLADIATOR
+    的背景是 RGBA(0,0,8,146)），只用 alpha 判斷會把整張表都當成內容。
+    """
+    br, bgc, bb, ba = bg[0], bg[1], bg[2], bg[3]
+    mask = bytearray(w * h)
+    for i in range(w * h):
+        o = i * 4
+        if rgba[o + 3] <= threshold:
+            continue
+        if (abs(rgba[o] - br) <= tol and abs(rgba[o + 1] - bgc) <= tol
+                and abs(rgba[o + 2] - bb) <= tol and abs(rgba[o + 3] - ba) <= tol):
+            continue
+        mask[i] = 1
+    return mask
+
+
+def largest_region(mask, w, h):
+    """在遮罩上找最大連通區塊，回傳 bbox (x0, y0, x1, y1)；找不到回 None。"""
     seen = bytearray(w * h)
     best = None
     for sy in range(h):
         for sx in range(w):
             idx = sy * w + sx
-            if seen[idx] or rgba[idx * 4 + 3] <= threshold:
+            if seen[idx] or not mask[idx]:
                 continue
             stack = [(sx, sy)]
             seen[idx] = 1
@@ -135,7 +163,7 @@ def largest_region(rgba, w, h, threshold=ALPHA_THRESHOLD):
                     nx, ny = x + dx, y + dy
                     if 0 <= nx < w and 0 <= ny < h:
                         n = ny * w + nx
-                        if not seen[n] and rgba[n * 4 + 3] > threshold:
+                        if not seen[n] and mask[n]:
                             seen[n] = 1
                             stack.append((nx, ny))
             if best is None or area > best[0]:
@@ -187,7 +215,17 @@ def render_prefab(game_dir, prefab):
         raw = f.read()
     tex = read_atlas(decrypt_dyn(raw))
     w, h, rgba = ktex_to_rgba(tex)
-    box = largest_region(rgba, w, h)
+
+    # 有些圖集把預覽圖鋪在半透明深色底上；先把背景清成透明再裁，
+    # 否則 Telegram 上會看到一整塊灰底。
+    mask = subject_mask(rgba, w, h, dominant_color(rgba))
+    cleaned = bytearray(rgba)
+    for i in range(w * h):
+        if not mask[i]:
+            cleaned[i * 4 + 3] = 0
+    rgba = bytes(cleaned)
+
+    box = largest_region(mask, w, h)
     if box is None:
         return None
     cw, ch, cropped = crop(rgba, w, h, box)
