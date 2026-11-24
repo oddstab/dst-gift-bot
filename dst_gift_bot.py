@@ -662,11 +662,20 @@ def send_card(token, chat, state, index, message_id=None):
     if not items:
         return None
     index = max(0, min(index, len(items) - 1))
+    if not resolve_icon(items[index].get("item")):
+        # 沒有圖的造型（預覽表之類）直接往後找最近一張有圖的
+        start = index
+        index = None
+        for step in range(1, len(items)):
+            candidate = (start + step) % len(items)
+            if resolve_icon(items[candidate].get("item")):
+                index = candidate
+                break
+        if index is None:
+            return None
     gift = items[index]
     path = resolve_icon(gift.get("item"))
     if not path:
-        if message_id:
-            telegram_answer(token, None, "這件沒有圖")
         return None
     caption = f"<b>{esc(gift_label(gift))}</b>"
     markup = json.dumps(pager_markup(index, len(items)), ensure_ascii=False)
@@ -724,9 +733,13 @@ def telegram_loop(state):
                                 num = int(payload.split(":", 1)[1])
                             except ValueError:
                                 num = 0
-                            telegram_answer(token, cq.get("id"))
-                            send_card(token, chat, state, num,
-                                      message_id=(cq.get("message") or {}).get("message_id"))
+                            # 立刻回答（回呼只有 10 秒壽命），重活丟背景執行
+                            telegram_answer(token, cq.get("id"), "載入中…")
+                            threading.Thread(
+                                target=send_card,
+                                args=(token, chat, state, num,
+                                      (cq.get("message") or {}).get("message_id")),
+                                daemon=True).start()
                     continue
 
                 msg = upd.get("message") or {}
