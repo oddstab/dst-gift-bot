@@ -195,39 +195,51 @@ key = [0x8d, 0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94]
 
 修好這兩點後，3532 個 `.dyn` 全部都能解出含 `atlas-0.tex` 的 ZIP。
 
-### KTEX
+### KTEX 與 `build.bin` 的 `SWAP_ICON`
 
-`atlas-0.tex` 是 Klei 自家的 `KTEX` 格式：`KTEX` magic + **140 bytes 檔頭**
-+ BC3(DXT5) 區塊（含 8 級 mip chain）。寬高是 little-endian `u16`，分別在 offset 8 與 10。
+`atlas-0.tex` 是 Klei 自家的 `KTEX` 格式：
 
-驗證方式：`512×512` 的圖集，8 級 mip 的 BC3 總量是
-`262144+65536+16384+4096+1024+256+64+16 = 349520`，檔案 349660 − 140 = 349520，
-剛好吻合；同樣的 140 bytes 偏移在 `512×256` 的 `abigail_flower` 圖集上也能正確解出。
+- `0..4`：`KTEX` magic
+- `4..8`：32-bit flags，其中 `bit 13..17`（`(flags >> 13) & 0x1F`）是 mipmap 層數 `N`
+- `8 .. 8 + 10*N`：`N` 個 10-byte mipmap entry（`<HHHI`：`width`、`height`、`pitch`、`data_size`）
+- `8 + 10*N` 起：緊接著所有 mipmap 的 BC3（DXT5）區塊
+
+因此**檔頭長度是動態的 `8 + 10 * N`**：
+- `512×512`（10 層 mip，到 `1×1`）：檔頭 `108` bytes，mip 總和 `349,552` bytes，合計 `349,660` bytes
+- `1024×1024`（11 層 mip，如 `HAND_WAXWELL_GLADIATOR`）：檔頭 `118` bytes，mip 總和 `1,398,128` bytes，合計 `1,398,246` bytes
+
+先前把檔頭寫死成 `140` bytes 時，`512×512` 剛好差 `32` bytes（2 個 16-byte BC3 區塊，只水平位移 8 像素、顏色沒錯位），但 `1024×1024` 差了 `22` bytes（`22 % 16 = 6`，在 16-byte BC3 區塊內錯位 6 bytes，把 alpha 與 color 混在一起才產生彩色雜訊與假底色）。改用 `8 + 10 * N` 後，所有尺寸的圖集都 1 byte 不差地對齊。
 
 **列序是 bottom-up**（OpenGL 慣例），照檔案順序直接輸出會上下顛倒——T 恤的領口會跑到下面。
-`ktex_to_rgba()` 在回傳前把列反轉。判斷依據：把同一張圖轉正後，T 恤的領口在上、
-袖子在兩側、下襬在下，才符合遊戲內的商品圖。
+`ktex_to_rgba()` 在回傳前把列反轉。
 
-解碼後的圖集是一張放滿零件的大圖（一件襯衫會有袖子、袖口、領子…），
-所以再取 **連通區塊中最大的一塊** 的 bbox 當代表圖。
+### 從 `build.bin` 定位 `SWAP_ICON`
 
-挑選主體時不能只看 alpha：有些圖集（例：`HAND_WAXWELL_GLADIATOR`）是**已合成的預覽表**，
-整張鋪在半透明深色底上（實測背景 RGBA = `(0, 0, 8, 146)`），alpha 處處大於門檻，
-只看 alpha 會把整張 1024×1024 都當成內容。作法是把「顏色與 alpha 都接近取樣背景色」
-的像素排除，再找連通區塊。
+圖集裡同時放了角色身上的所有動畫零件與選單用的商品圖示（`SWAP_ICON`）。
+若只取最大連通區塊，像 `HAND_WAXWELL_GLADIATOR`（雙手手套中間有縫隙）會抓到旁邊較大的護腕零件，
+`DECOR_LAMP_FANTASY` 則會抓到半截燈罩。
 
-但這類預覽表的 RGB 本身點描極重（放大看是一格一格的彩色點），裁出來仍然看不懂，
-因此目前**直接跳過**：偵測到背景 alpha > 8 就回 `None`，讓通知退回純文字。
-驗證過 BC1、位元組序反轉、區塊轉置、alpha/顏色分平面四種解法都不是成因，
-所以這是素材本身的呈現方式，不是解碼錯誤。
+遊戲選單（`scripts/widgets/itemimage.lua`）是透過 `SWAP_ICON` 這個 symbol 繪製圖示。
+Klei 的 symbol hash 為小寫字串的 SDBM hash：
 
-實測三個部位：
+```python
+h = 0
+for b in b"swap_icon":
+    h = (b + (h << 6) + (h << 16) - h) & 0xFFFFFFFF  # 0xF6AADF05
+```
 
-| prefab | 尺寸 | 非透明比例 |
+從 `data/databundles/anim_dynamic.zip` 內對應的 `anim/dynamic/<prefab>.zip` → `build.bin`
+找到 `0xF6AADF05` 的 frame（取得頂點起點 `v0` 與數量 `vcnt`），再到頂點表（每頂點 24 bytes `<ffffff`：`x, y, z, u, v, w`）
+取 `(u, v)` 的最小／最大值，就能直接算出 `SWAP_ICON` 在圖集上的精確像素矩形並裁切。
+
+實測代表性樣本：
+
+| prefab | 圖集尺寸 (mips) | 裁切尺寸 |
 |---|---|---|
-| `BODY_BUTTONS_BLUE_SKY` | 175×197 | 0.63 |
-| `DECOR_LAMP_FANTASY` | 240×233 | 0.55 |
-| `LEGS_WORTOX_SURVIVOR` | 201×175 | 0.50 |
+| `BODY_BUTTONS_BLUE_SKY` | 512×512 (10) | 179×197 |
+| `DECOR_LAMP_FANTASY` | 512×512 (10) | 137×192 |
+| `LEGS_WORTOX_SURVIVOR` | 512×512 (10) | 205×175 |
+| `HAND_WAXWELL_GLADIATOR` | 1024×1024 (11) | 176×181 |
 
 實作在 `dst_skinart.py`（只用標準函式庫，PNG 用 `zlib` 自行輸出），
 測試在 `test_skinart.py`。整個流程不連任何外部網站。

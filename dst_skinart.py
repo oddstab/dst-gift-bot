@@ -13,13 +13,17 @@
     解出來是含 `atlas-0.tex` 的 ZIP，裡面就是該造型的貼圖。
 
 KTEX
-    `KTEX` magic + 140 bytes 檔頭 + BC3(DXT5) 區塊，含 mip chain。
-    寬高是 little-endian u16，分別在 offset 8 與 10。
+    `KTEX` magic (4B) + flags u32 (4B，bit 13..17 為 mipmap 層數 N) +
+    N 個 10-byte mipmap entry (`<HHHI`：width, height, pitch, size) +
+    BC3(DXT5) 區塊。檔頭總長 = `8 + 10 * N`（512×512 為 108B，1024×1024 為 118B）。
 
 裁切
-    圖集是一張放滿零件的大圖，取 alpha 連通區塊中最大的一塊當代表圖。
+    優先從 `data/databundles/anim_dynamic.zip` 內對應的 `build.bin` 讀取
+    `SWAP_ICON`（SDBM hash `0xf6aadf05`）的頂點 UV 範圍，直接定位官方商品圖示；
+    若無 `build.bin` 則退回取最大連通區塊。
 """
 import io
+import os
 import struct
 import zipfile
 import zlib
@@ -27,7 +31,8 @@ import zlib
 DYN_SRC = (5, 3, 6, 7, 4, 2, 0, 1)
 DYN_KEY = (0x8D, 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94)
 KTEX_MAGIC = b"KTEX"
-KTEX_HEADER = 140          # KTEX magic 之後的固定檔頭長度（含 8 級 mip 表）
+KTEX_HEADER = 108          # 512x512 (10 mips) 的預設檔頭長度；實際由 ktex_header_size(tex) 動態計算
+SWAP_ICON_HASH = 0xF6AADF05
 ALPHA_THRESHOLD = 24
 
 
@@ -52,6 +57,15 @@ def read_atlas(dyn_bytes):
     """從解開的 ZIP 取出 atlas-0.tex。"""
     with zipfile.ZipFile(io.BytesIO(dyn_bytes)) as z:
         return z.read("atlas-0.tex")
+
+
+def ktex_header_size(tex):
+    """回傳 KTEX 檔頭長度：8 + 10 * mip_count。"""
+    if tex[:4] != KTEX_MAGIC:
+        raise ValueError("not a KTEX file")
+    flags = struct.unpack_from("<I", tex, 4)[0]
+    mips = (flags >> 13) & 0x1F
+    return 8 + mips * 10
 
 
 def ktex_size(tex):
@@ -90,11 +104,12 @@ def _bc3_block(block, out, w, bx, by):
 def ktex_to_rgba(tex):
     """解出 (寬, 高, RGBA bytes)。只取第一級 mip。"""
     w, h = ktex_size(tex)
-    need = KTEX_HEADER + ((w + 3) // 4) * ((h + 3) // 4) * 16
+    hdr = ktex_header_size(tex)
+    need = hdr + ((w + 3) // 4) * ((h + 3) // 4) * 16
     if len(tex) < need:
         raise ValueError(f"KTEX truncated: {len(tex)} < {need}")
     rgba = bytearray(w * h * 4)
-    pos = KTEX_HEADER
+    pos = hdr
     for by in range(h // 4):
         for bx in range(w // 4):
             _bc3_block(tex[pos:pos + 16], rgba, w, bx, by)
@@ -107,6 +122,87 @@ def ktex_to_rgba(tex):
     return w, h, bytes(flipped)
 
 
+def swap_icon_uv_box(build_bytes):
+    """從 build.bin 找出 SWAP_ICON 的頂點 UV 範圍 (u0, v0, u1, v1)；找不到回 None。"""
+    if build_bytes[:4] != b"BILD":
+        return None
+    _, _, nsyms, _, blen = struct.unpack_from("<4sIIII", build_bytes, 0)
+    pos = 20 + blen
+    natlas = struct.unpack_from("<I", build_bytes, pos)[0]
+    pos += 4
+    for _ in range(natlas):
+        alen = struct.unpack_from("<I", build_bytes, pos)[0]
+        pos += 4 + alen
+    target = None
+    for _ in range(nsyms):
+        shash, nimg = struct.unpack_from("<II", build_bytes, pos)
+        pos += 8
+        for _ in range(nimg):
+            fr = struct.unpack_from("<IIffffII", build_bytes, pos)
+            pos += 32
+            if shash == SWAP_ICON_HASH and target is None:
+                target = fr
+    if target is None:
+        return None
+    nverts = struct.unpack_from("<I", build_bytes, pos)[0]
+    pos += 4
+    v0, vcnt = target[6], target[7]
+    if vcnt <= 0 or v0 + vcnt > nverts:
+        return None
+    us, vs = [], []
+    for vi in range(v0, v0 + vcnt):
+        _, _, _, u, v, _ = struct.unpack_from("<ffffff", build_bytes, pos + vi * 24)
+        us.append(u)
+        vs.append(v)
+    return min(us), min(vs), max(us), max(vs)
+
+
+def load_swap_icon_box(game_dir, prefab, w, h):
+    """讀取 anim_dynamic.zip 內該造型的 SWAP_ICON 像素範圍 (x0, y0, x1, y1)。"""
+    bundle = os.path.join(game_dir, "data", "databundles", "anim_dynamic.zip")
+    if not os.path.isfile(bundle):
+        return None
+    entry = f"anim/dynamic/{prefab.lower()}.zip"
+    try:
+        with zipfile.ZipFile(bundle) as zf:
+            inner = zf.read(entry)
+        with zipfile.ZipFile(io.BytesIO(inner)) as iz:
+            build = iz.read("build.bin")
+    except Exception:
+        return None
+    uv = swap_icon_uv_box(build)
+    if not uv:
+        return None
+    u0, v0, u1, v1 = uv
+    x0 = max(0, min(w - 1, int(u0 * w)))
+    x1 = max(x0, min(w - 1, int(round(u1 * w)) - 1))
+    # 翻轉後的列座標：v=1 在頂部 (y=0)，v=0 在底部 (y=h-1)
+    y0 = max(0, min(h - 1, int((1.0 - v1) * h)))
+    y1 = max(y0, min(h - 1, int(round((1.0 - v0) * h)) - 1))
+    return x0, y0, x1, y1
+
+
+def trim_alpha(rgba, w, h, box, threshold=ALPHA_THRESHOLD):
+    """在給定的 box 內收緊到實際有非透明像素的範圍。"""
+    bx0, by0, bx1, by1 = box
+    x0, y0, x1, y1 = bx1, by1, bx0, by0
+    found = False
+    for y in range(by0, by1 + 1):
+        row = y * w
+        for x in range(bx0, bx1 + 1):
+            if rgba[(row + x) * 4 + 3] > threshold:
+                if x < x0:
+                    x0 = x
+                if x > x1:
+                    x1 = x
+                if y < y0:
+                    y0 = y
+                if y > y1:
+                    y1 = y
+                found = True
+    return (x0, y0, x1, y1) if found else box
+
+
 def dominant_color(rgba, step=16):
     """取樣找出最常見的顏色，當成背景色。"""
     counts = {}
@@ -117,11 +213,7 @@ def dominant_color(rgba, step=16):
 
 
 def subject_mask(rgba, w, h, bg, threshold=ALPHA_THRESHOLD, tol=40):
-    """不是背景、也不是透明的像素。
-
-    有些造型的圖集是把預覽圖鋪在半透明深色底上（例：HAND_WAXWELL_GLADIATOR
-    的背景是 RGBA(0,0,8,146)），只用 alpha 判斷會把整張表都當成內容。
-    """
+    """不是背景、也不是透明的像素。"""
     br, bgc, bb, ba = bg[0], bg[1], bg[2], bg[3]
     mask = bytearray(w * h)
     for i in range(w * h):
@@ -207,7 +299,6 @@ def opaque_ratio(rgba):
 
 def render_prefab(game_dir, prefab):
     """prefab -> PNG bytes；本機沒有這個造型的 .dyn 就回 None。"""
-    import os
     path = os.path.join(game_dir, "data", "anim", "dynamic", prefab.lower() + ".dyn")
     if not os.path.isfile(path):
         return None
@@ -216,21 +307,13 @@ def render_prefab(game_dir, prefab):
     tex = read_atlas(decrypt_dyn(raw))
     w, h, rgba = ktex_to_rgba(tex)
 
-    # 有些圖集把預覽圖鋪在半透明深色底上；先把背景清成透明再裁，
-    # 否則 Telegram 上會看到一整塊灰底。
-    bg = dominant_color(rgba)
-    if bg[3] > 8:
-        # 這種圖集是「已合成的預覽表」：整張鋪在半透明底色上，RGB 本身點描成雜訊，
-        # 硬裁出來只會是一團看不懂的彩色斑點。寧可退回純文字。
-        return None
-    mask = subject_mask(rgba, w, h, bg)
-    cleaned = bytearray(rgba)
-    for i in range(w * h):
-        if not mask[i]:
-            cleaned[i * 4 + 3] = 0
-    rgba = bytes(cleaned)
-
-    box = largest_region(mask, w, h)
+    box = load_swap_icon_box(game_dir, prefab, w, h)
+    if box is not None:
+        box = trim_alpha(rgba, w, h, box)
+    else:
+        bg = dominant_color(rgba)
+        mask = subject_mask(rgba, w, h, bg)
+        box = largest_region(mask, w, h)
     if box is None:
         return None
     cw, ch, cropped = crop(rgba, w, h, box)

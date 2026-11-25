@@ -28,9 +28,9 @@ def find_game():
 
 
 GAME = find_game()
-# 三個不同部位，外加一個檔案長度剛好是 8 的倍數的樣本（尾端區塊不可被轉換）
+# 三個不同部位，外加一個檔案長度剛好是 8 的倍數的樣本，以及一個 1024x1024 (11-mip, header=118B) 的樣本
 SAMPLES = ("BODY_BUTTONS_BLUE_SKY", "DECOR_LAMP_FANTASY", "LEGS_WORTOX_SURVIVOR",
-           "HAND_WARLY_CANDYMAN")
+           "HAND_WARLY_CANDYMAN", "HAND_WAXWELL_GLADIATOR")
 
 
 def decode_png(data):
@@ -96,14 +96,19 @@ class SkinArtTest(unittest.TestCase):
         self.assertEqual(skinart.read_atlas(raw)[:4], b"KTEX")
 
     def test_ktex_size_matches_header(self):
-        path = os.path.join(GAME, "data", "anim", "dynamic", "body_buttons_blue_sky.dyn")
-        with open(path, "rb") as f:
-            tex = skinart.read_atlas(skinart.decrypt_dyn(f.read()))
-        w, h = skinart.ktex_size(tex)
-        self.assertGreater(w, 0)
-        self.assertGreater(h, 0)
-        need = skinart.KTEX_HEADER + ((w + 3) // 4) * ((h + 3) // 4) * 16
-        self.assertGreaterEqual(len(tex), need)
+        for prefab, expected_hdr in (("body_buttons_blue_sky", 108),
+                                     ("hand_waxwell_gladiator", 118)):
+            with self.subTest(prefab=prefab):
+                path = os.path.join(GAME, "data", "anim", "dynamic", prefab + ".dyn")
+                with open(path, "rb") as f:
+                    tex = skinart.read_atlas(skinart.decrypt_dyn(f.read()))
+                w, h = skinart.ktex_size(tex)
+                hdr = skinart.ktex_header_size(tex)
+                self.assertEqual(hdr, expected_hdr)
+                self.assertGreater(w, 0)
+                self.assertGreater(h, 0)
+                need = hdr + ((w + 3) // 4) * ((h + 3) // 4) * 16
+                self.assertGreaterEqual(len(tex), need)
 
     def test_three_slots_render_non_blank_png(self):
         for prefab in SAMPLES:
@@ -120,9 +125,9 @@ class SkinArtTest(unittest.TestCase):
                           for i in range(0, len(rgba), 4) if rgba[i + 3] > 24}
                 self.assertGreater(len(colors), 8, f"{prefab} 顏色種類過少")
 
-    def test_baked_preview_atlas_falls_back_to_text(self):
-        # 這件是「半透明底 + 點描」的預覽表，硬裁只會得到彩色雜訊，應該回 None
-        self.assertIsNone(skinart.render_prefab(GAME, "HAND_WAXWELL_GLADIATOR"))
+    def test_swap_icon_box_matches_build_bin(self):
+        box = skinart.load_swap_icon_box(GAME, "HAND_WAXWELL_GLADIATOR", 1024, 1024)
+        self.assertEqual(box, (0, 0, 176, 180))
 
     def test_unknown_prefab_returns_none(self):
         self.assertIsNone(skinart.render_prefab(GAME, "NOT_A_REAL_SKIN_PREFAB"))

@@ -44,9 +44,10 @@ CONFIG = {}
 SKIN_NAMES = {}                 # prefab -> 英文名（遊戲自己的 skin_strings.lua）
 SKIN_ZH = {}                    # 英文名 -> 繁中名（chinese_t.po）
 ICON_CACHE_PATH = os.path.join(BASE, "icons.json")
-# 解碼器一改版就換目錄名，避免吃到舊的快取圖（例：v2 = 修正上下顛倒之後）
-ICON_DIR = os.path.join(BASE, "icons_v4")
+# 解碼器一改版就換目錄名，避免吃到舊的快取圖（v5 = SWAP_ICON UV + 動態 KTEX header）
+ICON_DIR = os.path.join(BASE, "icons_v5")
 ICON_CACHE = {}                 # PREFAB -> 本機產生的 PNG 路徑
+_CARD_LOCK = threading.Lock()
 
 SLOT_EMOJI = {"BODY": "👕", "LEGS": "👖", "FEET": "👟", "HAND": "🧤", "HEAD": "🎩",
               "DECOR": "🪑", "PROFILEFLAIR": "✨", "PROFILEICON": "🖼", "EMOTE": "💃",
@@ -658,43 +659,54 @@ def pager_markup(index, total):
 
 def send_card(token, chat, state, index, message_id=None):
     """送出一張造型卡；有 message_id 就原地換圖（Telegram 會標成 edited）。"""
-    items = card_items(state)
-    if not items:
-        return None
-    index = max(0, min(index, len(items) - 1))
-    if not resolve_icon(items[index].get("item")):
-        # 沒有圖的造型（預覽表之類）直接往後找最近一張有圖的
-        start = index
-        index = None
-        for step in range(1, len(items)):
-            candidate = (start + step) % len(items)
-            if resolve_icon(items[candidate].get("item")):
-                index = candidate
-                break
-        if index is None:
+    with _CARD_LOCK:
+        items = card_items(state)
+        if not items:
             return None
-    gift = items[index]
-    path = resolve_icon(gift.get("item"))
-    if not path:
-        return None
-    caption = f"<b>{esc(gift_label(gift))}</b>"
-    markup = json.dumps(pager_markup(index, len(items)), ensure_ascii=False)
-    if message_id:
-        media = json.dumps({"type": "photo", "media": "attach://photo",
-                            "caption": caption, "parse_mode": "HTML"}, ensure_ascii=False)
-        try:
-            return _post_multipart(f"{TG_API}/bot{token}/editMessageMedia", "photo", path,
-                                   {"chat_id": chat, "message_id": message_id,
-                                    "media": media, "reply_markup": markup})
-        except urllib.error.HTTPError as e:
-            # 訊息太舊或已被刪掉（Telegram 回 400）就改送一張新的，不要讓整輪掛掉
-            log(f"editMessageMedia failed, sending a new card: {http_error_text(e)}")
-        except Exception as e:
-            log(f"editMessageMedia failed, sending a new card: {e}")
-    telegram_action(token, chat)
-    return _post_multipart(f"{TG_API}/bot{token}/sendPhoto", "photo", path,
-                           {"chat_id": chat, "caption": caption,
-                            "parse_mode": "HTML", "reply_markup": markup})
+        index = max(0, min(index, len(items) - 1))
+        if not resolve_icon(items[index].get("item")):
+            # 沒有圖的造型直接往後找最近一張有圖的
+            start = index
+            index = None
+            for step in range(1, len(items)):
+                candidate = (start + step) % len(items)
+                if resolve_icon(items[candidate].get("item")):
+                    index = candidate
+                    break
+            if index is None:
+                return None
+        gift = items[index]
+        path = resolve_icon(gift.get("item"))
+        if not path:
+            return None
+        caption = f"<b>{esc(gift_label(gift))}</b>"
+        markup = json.dumps(pager_markup(index, len(items)), ensure_ascii=False)
+        if message_id:
+            media = json.dumps({"type": "photo", "media": "attach://photo",
+                                "caption": caption, "parse_mode": "HTML"}, ensure_ascii=False)
+            try:
+                return _post_multipart(f"{TG_API}/bot{token}/editMessageMedia", "photo", path,
+                                       {"chat_id": chat, "message_id": message_id,
+                                        "media": media, "reply_markup": markup})
+            except urllib.error.HTTPError as e:
+                err = http_error_text(e)
+                if "message is not modified" not in err:
+                    log(f"editMessageMedia failed: {err}")
+                return None
+            except Exception as e:
+                log(f"editMessageMedia failed: {e}")
+                return None
+        telegram_action(token, chat)
+        return _post_multipart(f"{TG_API}/bot{token}/sendPhoto", "photo", path,
+                               {"chat_id": chat, "caption": caption,
+                                "parse_mode": "HTML", "reply_markup": markup})
+
+
+def warm_card_icons(state):
+    """預先把本週掉落的造型圖快取好，翻頁時就不用現場解碼。"""
+    for g in card_items(state):
+        if g.get("item"):
+            resolve_icon(g["item"])
 
 
 def telegram_loop(state):
@@ -706,6 +718,7 @@ def telegram_loop(state):
         return
     log("telegram listener started" + ("" if chat else ", waiting for the first message to bind"))
     telegram_setup(token)
+    threading.Thread(target=warm_card_icons, args=(state,), daemon=True).start()
     offset = 0
     while True:
         try:
@@ -717,12 +730,6 @@ def telegram_loop(state):
 
                 cq = upd.get("callback_query")      # 造型卡的翻頁按鈕
                 if cq:
-                    # 重啟後 Telegram 會重播未確認的回呼；超過兩分鐘的按鈕一律忽略，
-                    # 否則 answerCallbackQuery 會一直回 400。
-                    age = time.time() - float((cq.get("message") or {}).get("date") or 0)
-                    if age > 120:
-                        log(f"ignoring stale callback ({int(age)}s old)")
-                        continue
                     cchat = str(((cq.get("message") or {}).get("chat") or {}).get("id") or "")
                     if chat and cchat == chat:
                         payload = cq.get("data") or ""
@@ -733,8 +740,8 @@ def telegram_loop(state):
                                 num = int(payload.split(":", 1)[1])
                             except ValueError:
                                 num = 0
-                            # 立刻回答（回呼只有 10 秒壽命），重活丟背景執行
-                            telegram_answer(token, cq.get("id"), "載入中…")
+                            # 立刻回答（回呼只有 10 秒壽命），換圖丟背景執行
+                            telegram_answer(token, cq.get("id"))
                             threading.Thread(
                                 target=send_card,
                                 args=(token, chat, state, num,
